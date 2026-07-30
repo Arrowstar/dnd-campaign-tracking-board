@@ -54,7 +54,9 @@ export default function MemberManagementModal({
 
   if (!isOpen) return null;
 
-  const handleKick = async (member: BoardMemberInfo) => {
+  const handleKick = async (e: React.MouseEvent, member: BoardMemberInfo) => {
+    e.stopPropagation();
+    e.preventDefault();
     if (!confirm(`Are you sure you want to remove "${member.displayName}" from this campaign?`)) return;
 
     setKickingId(member.id);
@@ -143,7 +145,8 @@ export default function MemberManagementModal({
 
                   {currentUserRole === 'dm' && !isSelf && !isDM && (
                     <button
-                      onClick={() => handleKick(member)}
+                      type="button"
+                      onClick={(e) => handleKick(e, member)}
                       disabled={kickingId === member.id}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
                       style={{ border: '1px solid rgba(239,68,68,0.2)' }}
