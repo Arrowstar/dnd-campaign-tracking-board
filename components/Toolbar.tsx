@@ -7,7 +7,7 @@ import {
   Swords, Flag, Shield, Activity, Image as ImageIcon,
   MoveRight, X, Palette, Sliders, Minus, MoveHorizontal,
   Circle, Square, Type, Pencil, MousePointer, LogOut,
-  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound
 } from 'lucide-react';
 import { 
   ANNOTATION_COLOR_PRESETS, 
@@ -67,6 +67,9 @@ interface ToolbarProps {
   setActiveAnnFillColor: (color: string) => void;
   activeAnnFontStyle: AnnotationFontStyle;
   setActiveAnnFontStyle: (fontStyle: AnnotationFontStyle) => void;
+
+  onOpenMembersModal?: () => void;
+  onOpenSettingsModal?: () => void;
 }
 
 export default function Toolbar({ 
@@ -93,6 +96,9 @@ export default function Toolbar({
   setActiveAnnFillColor,
   activeAnnFontStyle,
   setActiveAnnFontStyle,
+
+  onOpenMembersModal,
+  onOpenSettingsModal,
 }: ToolbarProps) {
   const [showConnectSettings, setShowConnectSettings] = useState(false);
   const [showAnnSettings, setShowAnnSettings] = useState(false);
@@ -109,9 +115,20 @@ export default function Toolbar({
   ];
 
   const handleLeaveBoard = () => {
-    // Clear the full session so the next person to log in on this device
-    // gets a fresh identity — never inherit another player's UUID.
-    localStorage.removeItem('dnd_user');
+    // Invalidate the server-side session token, then clear localStorage
+    try {
+      const raw = localStorage.getItem('dnd_session');
+      if (raw) {
+        const { sessionToken } = JSON.parse(raw);
+        if (sessionToken) {
+          fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${sessionToken}` },
+          }).catch(() => {});
+        }
+      }
+    } catch { /* ignore */ }
+    localStorage.removeItem('dnd_session');
     window.location.href = '/';
   };
 
@@ -137,10 +154,35 @@ export default function Toolbar({
               {user.role.toUpperCase()}
             </span>
           </div>
+
+          {onOpenMembersModal && (
+            <button
+              type="button"
+              onClick={onOpenMembersModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs ml-1"
+              title="View and manage campaign members"
+            >
+              <Users size={14} className="text-[#B58D3D]" />
+              <span>Members</span>
+            </button>
+          )}
+
+          {onOpenSettingsModal && (
+            <button
+              type="button"
+              onClick={onOpenSettingsModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Account settings & change password"
+            >
+              <KeyRound size={14} className="text-[#B58D3D]" />
+              <span>Settings</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleLeaveBoard}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs ml-1"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
             title="Log out of this board and return to Main Menu"
           >
             <LogOut size={14} className="text-[#B58D3D]" />

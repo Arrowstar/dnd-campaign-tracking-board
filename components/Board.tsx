@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { BoardItem as BoardItemType, Connection, User, BoardState, BoardTab, BoardAnnotation, AnnotationFontStyle } from '@/lib/types';
+import { BoardItem as BoardItemType, Connection, User, BoardTab, BoardAnnotation, AnnotationFontStyle } from '@/lib/types';
 import BoardItem, { ITEM_FIELD_DEFS } from './BoardItem';
 import Toolbar, { ARROW_COLOR_PRESETS, ARROW_LINE_STYLES, ARROW_LINE_WIDTHS } from './Toolbar';
 import TabBar, { TAB_COLOR_PRESETS } from './TabBar';
@@ -15,6 +15,9 @@ import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
 import { fileToCompressedDataURL } from '@/lib/utils';
+import { io } from 'socket.io-client';
+import UserSettingsModal from './UserSettingsModal';
+import MemberManagementModal from './MemberManagementModal';
 
 function getBoxIntersection(cx: number, cy: number, hw: number, hh: number, targetCx: number, targetCy: number) {
   const dx = targetCx - cx;
@@ -40,6 +43,10 @@ export default function Board({ boardId }: { boardId: string }) {
     { id: 'default-tab', name: 'Main Board', color: '#3B82F6', items: [], connections: [] }
   ]);
   const [activeTabId, setActiveTabId] = useState<string>('default-tab');
+
+  // Modals
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0] || {
     id: 'default-tab',
@@ -171,63 +178,98 @@ export default function Board({ boardId }: { boardId: string }) {
   }, [items, user, getItemRectInContainer]);
 
   useEffect(() => {
-    const stored = localStorage.getItem('dnd_user');
-    if (!stored) {
-      window.location.href = '/';
-      return;
-    }
-    const u: User = JSON.parse(stored);
-    // Reject incomplete session objects (missing id, role, or boardId) —
-    // these can occur when a user leaves a board via the Toolbar which
-    // strips role/boardId, or when a second player logs in on the same
-    // browser and the old session is still present.
-    if (!u.id || !u.role || u.boardId !== boardId) {
-      window.location.href = '/';
-      return;
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setUser(u);
+    // Read the session token written by the lobby on login
+    let sessionToken: string | null = null;
+    try {
+      const raw = localStorage.getItem('dnd_session');
+      if (raw) sessionToken = JSON.parse(raw).sessionToken ?? null;
+    } catch { /* ignore */ }
 
-    // Fetch initial board state from API
-    fetch(`/api/boards/${boardId}`)
-      .then((res) => res.json())
-      .then((incomingState: BoardState) => {
+    if (!sessionToken) {
+      window.location.href = '/';
+      return;
+    }
+
+    // Single call: validates session + membership + returns board state
+    fetch(`/api/boards/${boardId}/state`, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    })
+      .then(res => {
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = '/';
+          return null;
+        }
+        return res.json();
+      })
+      .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[] } | null) => {
+        if (!data) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setUser({
+          id: data.userId,
+          name: data.username,
+          role: data.role,
+          boardId,
+          sessionToken: sessionToken!,
+        });
         let parsedTabs: BoardTab[] = [];
-        if (incomingState.tabs && Array.isArray(incomingState.tabs) && incomingState.tabs.length > 0) {
-          parsedTabs = incomingState.tabs;
+        if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
+          parsedTabs = data.tabs;
         } else {
-          parsedTabs = [
-            {
-              id: 'default-tab',
-              name: 'Main Board',
-              color: '#3B82F6',
-              items: incomingState.items || [],
-              connections: incomingState.connections || []
-            }
-          ];
+          parsedTabs = [{
+            id: 'default-tab', name: 'Main Board', color: '#3B82F6', items: [], connections: []
+          }];
         }
         setTabs(parsedTabs);
-        setActiveTabId((prevId) => {
-          if (parsedTabs.some((t) => t.id === prevId)) return prevId;
+        setActiveTabId(prev => {
+          if (parsedTabs.some(t => t.id === prev)) return prev;
           return parsedTabs[0]?.id || 'default-tab';
         });
       })
-      .catch((err) => console.error('Failed to load board state:', err));
+      .catch(err => console.error('Failed to load board:', err));
   }, [boardId]);
+
+  // Real-time socket sync & kick notifications
+  useEffect(() => {
+    if (!user || !user.sessionToken) return;
+    const socket = io();
+
+    socket.emit('join_board', { boardId, sessionToken: user.sessionToken });
+
+    socket.on('board_update', (data: { tabs: BoardTab[] }) => {
+      if (data && data.tabs) {
+        setTabs(data.tabs);
+      }
+    });
+
+    socket.on('member_kicked', (data: { targetUserId: string }) => {
+      if (data.targetUserId === user.id) {
+        alert('You have been removed from this campaign by the Dungeon Master.');
+        window.location.href = '/';
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [boardId, user]);
 
   const persistBoardState = useCallback(
     async (updatedTabs: BoardTab[]) => {
+      if (!user?.sessionToken) return;
       try {
-        await fetch(`/api/boards/${boardId}`, {
+        await fetch(`/api/boards/${boardId}/state`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${user.sessionToken}`,
+          },
           body: JSON.stringify({ tabs: updatedTabs }),
         });
       } catch (err) {
         console.error('Error saving board state:', err);
       }
     },
-    [boardId]
+    [boardId, user?.sessionToken]
   );
 
   const saveState = useCallback(
@@ -717,6 +759,8 @@ export default function Board({ boardId }: { boardId: string }) {
         setActiveAnnFillColor={setActiveAnnFillColor}
         activeAnnFontStyle={activeAnnFontStyle}
         setActiveAnnFontStyle={setActiveAnnFontStyle}
+        onOpenMembersModal={() => setShowMembersModal(true)}
+        onOpenSettingsModal={() => setShowUserSettingsModal(true)}
       />
       <TabBar
         tabs={tabs}
@@ -1278,6 +1322,26 @@ export default function Board({ boardId }: { boardId: string }) {
             />
           );
         })()}
+
+        {/* ── Account Settings & Member Management Modals ── */}
+        {user && (
+          <>
+            <UserSettingsModal
+              isOpen={showUserSettingsModal}
+              onClose={() => setShowUserSettingsModal(false)}
+              sessionToken={user.sessionToken}
+              username={user.name}
+            />
+            <MemberManagementModal
+              isOpen={showMembersModal}
+              onClose={() => setShowMembersModal(false)}
+              boardId={boardId}
+              sessionToken={user.sessionToken}
+              currentUserId={user.id}
+              currentUserRole={user.role}
+            />
+          </>
+        )}
       </div>
     </div>
   );
