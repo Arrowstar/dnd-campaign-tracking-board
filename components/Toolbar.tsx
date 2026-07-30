@@ -6,7 +6,7 @@ import {
   Users, User, Map, Scroll, BookOpen, Clock,
   Swords, Flag, Shield, Activity, Image as ImageIcon,
   MoveRight, X, Palette, Sliders, Minus, MoveHorizontal,
-  Circle, Square, Type, Pencil, MousePointer,
+  Circle, Square, Type, Pencil, MousePointer, LogOut,
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check
 } from 'lucide-react';
 import { 
@@ -108,11 +108,33 @@ export default function Toolbar({
     { id: 'ann_text', label: 'Draw Text', Icon: Type },
   ];
 
+  const handleLeaveBoard = () => {
+    const userStr = localStorage.getItem('dnd_user');
+    if (userStr) {
+      try {
+        const u = JSON.parse(userStr);
+        localStorage.setItem('dnd_user', JSON.stringify({ id: u.id, name: u.name }));
+      } catch (e) {
+        localStorage.removeItem('dnd_user');
+      }
+    } else {
+      localStorage.removeItem('dnd_user');
+    }
+    window.location.href = '/';
+  };
+
   return (
     <div className="relative">
       <div className="h-16 bg-[#2C2824] border-b border-[#B58D3D] flex items-center justify-between px-4 z-50 flex-shrink-0 relative">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-[#B58D3D] rounded-lg flex items-center justify-center font-serif text-2xl font-bold italic shadow-inner text-[#E0D8D0]">M</div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleLeaveBoard}
+            className="w-10 h-10 bg-[#B58D3D] hover:bg-[#96722E] rounded-lg flex items-center justify-center font-serif text-2xl font-bold italic shadow-inner text-[#E0D8D0] transition-colors cursor-pointer"
+            title="Return to Main Menu"
+          >
+            M
+          </button>
           <div>
             <h1 className="text-lg font-bold text-[#E0D8D0] font-serif italic leading-tight">Board: {user.boardId}</h1>
           </div>
@@ -123,6 +145,15 @@ export default function Toolbar({
               {user.role.toUpperCase()}
             </span>
           </div>
+          <button
+            type="button"
+            onClick={handleLeaveBoard}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs ml-1"
+            title="Log out of this board and return to Main Menu"
+          >
+            <LogOut size={14} className="text-[#B58D3D]" />
+            <span>Leave Board</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-3 px-2">
