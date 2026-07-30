@@ -177,7 +177,11 @@ export default function Board({ boardId }: { boardId: string }) {
       return;
     }
     const u: User = JSON.parse(stored);
-    if (u.boardId !== boardId) {
+    // Reject incomplete session objects (missing id, role, or boardId) —
+    // these can occur when a user leaves a board via the Toolbar which
+    // strips role/boardId, or when a second player logs in on the same
+    // browser and the old session is still present.
+    if (!u.id || !u.role || u.boardId !== boardId) {
       window.location.href = '/';
       return;
     }

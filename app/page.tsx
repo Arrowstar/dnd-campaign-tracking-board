@@ -32,16 +32,10 @@ export default function Home() {
     }
   }, []);
 
+  // Always issue a fresh UUID at login time so different players on the
+  // same device don't accidentally inherit each other's identity.
   const getOrCreateUserId = () => {
-    let userStr = localStorage.getItem('dnd_user');
-    let userId = uuidv4();
-    if (userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        if (user.id) userId = user.id;
-      } catch (e) {}
-    }
-    return userId;
+    return uuidv4();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

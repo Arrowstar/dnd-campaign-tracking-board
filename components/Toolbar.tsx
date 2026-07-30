@@ -109,17 +109,9 @@ export default function Toolbar({
   ];
 
   const handleLeaveBoard = () => {
-    const userStr = localStorage.getItem('dnd_user');
-    if (userStr) {
-      try {
-        const u = JSON.parse(userStr);
-        localStorage.setItem('dnd_user', JSON.stringify({ id: u.id, name: u.name }));
-      } catch (e) {
-        localStorage.removeItem('dnd_user');
-      }
-    } else {
-      localStorage.removeItem('dnd_user');
-    }
+    // Clear the full session so the next person to log in on this device
+    // gets a fresh identity — never inherit another player's UUID.
+    localStorage.removeItem('dnd_user');
     window.location.href = '/';
   };
 
