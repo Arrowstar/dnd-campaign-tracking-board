@@ -14,7 +14,7 @@ import StructuredBoardItemFields, { FieldDef } from './StructuredBoardItemFields
 import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
-import { fileToCompressedDataURL } from '@/lib/utils';
+import { uploadFileToBlob } from '@/lib/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -591,8 +591,8 @@ function ImageBoardItemContent({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await fileToCompressedDataURL(file);
-      onUpdate({ ...item, content: dataUrl });
+      const imageUrl = await uploadFileToBlob(file);
+      onUpdate({ ...item, content: imageUrl });
       setShowUrlInput(false);
     } catch (err) {
       console.error('Error processing uploaded image:', err);
@@ -607,8 +607,8 @@ function ImageBoardItemContent({
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
       try {
-        const dataUrl = await fileToCompressedDataURL(file);
-        onUpdate({ ...item, content: dataUrl });
+        const imageUrl = await uploadFileToBlob(file);
+        onUpdate({ ...item, content: imageUrl });
         setShowUrlInput(false);
       } catch (err) {
         console.error('Error processing dropped image:', err);

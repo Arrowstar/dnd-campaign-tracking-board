@@ -49,7 +49,7 @@ export default function Board({ boardId }: { boardId: string }) {
   const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
 
   // Persistence status — surfaced in the UI instead of silently swallowed
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0] || {
     id: 'default-tab',
@@ -265,6 +265,15 @@ export default function Board({ boardId }: { boardId: string }) {
     (updatedTabs: BoardTab[]) => {
       if (!user?.sessionToken) return;
       saveQueueRef.current = saveQueueRef.current.then(async () => {
+        const body = JSON.stringify({ tabs: updatedTabs });
+        const approxMb = body.length / (1024 * 1024);
+        if (approxMb > 4) {
+          console.error(`Board payload is ${approxMb.toFixed(2)} MB — too large to save.`);
+          setSaveError(
+            'This board is too large to save (likely an old image stored directly in the board instead of as a link). Contact the DM about running the image migration.'
+          );
+          return;
+        }
         try {
           const res = await fetch(`/api/boards/${boardId}/state`, {
             method: 'POST',
@@ -272,18 +281,22 @@ export default function Board({ boardId }: { boardId: string }) {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${user.sessionToken}`,
             },
-            body: JSON.stringify({ tabs: updatedTabs }),
+            body,
           });
           if (!res.ok) {
             const detail = await res.text().catch(() => '');
             console.error('Board save failed:', res.status, detail);
-            setSaveError(true);
+            setSaveError(
+              res.status === 413
+                ? 'This board is too large to save. Contact the DM about running the image migration.'
+                : "Your last change couldn't be saved. Retrying automatically."
+            );
             return;
           }
-          setSaveError(false);
+          setSaveError(null);
         } catch (err) {
           console.error('Error saving board state:', err);
-          setSaveError(true);
+          setSaveError("Your last change couldn't be saved. Retrying automatically.");
         }
       });
     },
@@ -752,7 +765,7 @@ export default function Board({ boardId }: { boardId: string }) {
     <div className="w-screen h-screen bg-[#F5F2ED] overflow-hidden relative font-sans text-[#423D38] flex flex-col">
       {saveError && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-red-600 text-white text-sm text-center py-1.5 px-4">
-          Your last change couldn&apos;t be saved. Check your connection — retrying automatically.
+          {saveError}
         </div>
       )}
       <Toolbar 
