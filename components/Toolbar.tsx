@@ -115,20 +115,7 @@ export default function Toolbar({
   ];
 
   const handleLeaveBoard = () => {
-    // Invalidate the server-side session token, then clear localStorage
-    try {
-      const raw = localStorage.getItem('dnd_session');
-      if (raw) {
-        const { sessionToken } = JSON.parse(raw);
-        if (sessionToken) {
-          fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${sessionToken}` },
-          }).catch(() => {});
-        }
-      }
-    } catch { /* ignore */ }
-    localStorage.removeItem('dnd_session');
+    // Return to the lobby — keep the session intact, don't log the user out.
     window.location.href = '/';
   };
 
@@ -183,7 +170,7 @@ export default function Toolbar({
             type="button"
             onClick={handleLeaveBoard}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
-            title="Log out of this board and return to Main Menu"
+            title="Return to Main Menu"
           >
             <LogOut size={14} className="text-[#B58D3D]" />
             <span>Leave Board</span>
@@ -996,5 +983,3 @@ export default function Toolbar({
     </div>
   );
 }
-
-
