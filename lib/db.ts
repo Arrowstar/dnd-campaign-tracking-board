@@ -1,9 +1,13 @@
 import { neon } from '@neondatabase/serverless';
 
+export function getConnectionString(): string | undefined {
+  return process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+}
+
 export function getSql() {
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = getConnectionString();
   if (!connectionString) {
-    throw new Error('DATABASE_URL environment variable is not defined.');
+    throw new Error('DATABASE_URL or POSTGRES_URL environment variable is not defined.');
   }
   return neon(connectionString);
 }

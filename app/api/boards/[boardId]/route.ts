@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSql, ensureBoardsTable } from '@/lib/db';
+import { getSql, ensureBoardsTable, getConnectionString } from '@/lib/db';
 
 export async function GET(
   request: NextRequest,
@@ -11,7 +11,9 @@ export async function GET(
       return NextResponse.json({ error: 'Board ID is required' }, { status: 400 });
     }
 
-    if (!process.env.DATABASE_URL) {
+    const connStr = getConnectionString();
+    if (!connStr) {
+      console.warn('No database connection string found in environment.');
       return NextResponse.json({
         exists: true,
         requiresBoardPassword: false,
@@ -37,13 +39,24 @@ export async function GET(
       });
     }
 
+    let boardData = rows[0].data;
+    if (typeof boardData === 'string') {
+      try {
+        boardData = JSON.parse(boardData);
+      } catch (e) {
+        console.error('Failed to parse stored JSON data:', e);
+      }
+    }
+
+    const parsedTabs = boardData?.tabs && Array.isArray(boardData.tabs) ? boardData.tabs : [];
+
     return NextResponse.json({
       exists: true,
       requiresBoardPassword: false,
-      ...rows[0].data
+      tabs: parsedTabs
     });
   } catch (error: any) {
-    console.error('Error fetching board data:', error);
+    console.error('Error fetching board data from Neon DB:', error);
     return NextResponse.json({
       exists: true,
       requiresBoardPassword: false,
@@ -66,24 +79,28 @@ export async function POST(
 
     const body = await request.json();
 
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json({ success: true, warning: 'DATABASE_URL not set' });
+    const connStr = getConnectionString();
+    if (!connStr) {
+      console.warn('No database connection string found in environment during POST.');
+      return NextResponse.json({ success: true, warning: 'No database connection string configured' });
     }
 
     await ensureBoardsTable();
     const sql = getSql();
-    const jsonString = JSON.stringify(body);
+
+    // Ensure data is formatted as valid JSON string for PostgreSQL JSONB
+    const jsonPayload = typeof body === 'string' ? body : JSON.stringify(body);
 
     await sql`
       INSERT INTO boards (id, data, updated_at)
-      VALUES (${boardId}, ${jsonString}::jsonb, NOW())
+      VALUES (${boardId}, ${jsonPayload}::jsonb, NOW())
       ON CONFLICT (id)
-      DO UPDATE SET data = ${jsonString}::jsonb, updated_at = NOW()
+      DO UPDATE SET data = ${jsonPayload}::jsonb, updated_at = NOW()
     `;
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('Error updating board data:', error);
+    console.error('Error updating board data in Neon DB:', error);
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
   }
 }

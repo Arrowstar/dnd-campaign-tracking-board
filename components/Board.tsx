@@ -242,6 +242,7 @@ export default function Board({ boardId }: { boardId: string }) {
           return t;
         });
 
+        // Trigger asynchronous persistence
         persistBoardState(updatedTabs);
         return updatedTabs;
       });
