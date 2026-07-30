@@ -61,10 +61,28 @@ export async function uploadFileToBlob(file: File): Promise<string> {
     if (res.ok) {
       const data = await res.json();
       if (data.url) return data.url;
+      // Server responded 200 but gave no URL — this is the
+      // BLOB_READ_WRITE_TOKEN-missing case from app/api/upload/route.ts.
+      console.error(
+        '[uploadFileToBlob] /api/upload returned no URL — falling back to embedding this image as base64, ' +
+          'which will bloat the saved board. Check that BLOB_READ_WRITE_TOKEN is set on Vercel and redeploy. ' +
+          'Server said:',
+        data.warning || data
+      );
+    } else {
+      const detail = await res.text().catch(() => '');
+      console.error(
+        `[uploadFileToBlob] /api/upload failed (${res.status}) — falling back to embedding this image as base64, ` +
+          'which will bloat the saved board:',
+        detail
+      );
     }
   } catch (err) {
-    console.warn('Vercel blob upload skipped, using data URL fallback:', err);
+    console.error(
+      '[uploadFileToBlob] Request to /api/upload threw — falling back to embedding this image as base64, ' +
+        'which will bloat the saved board:',
+      err
+    );
   }
   return fileToCompressedDataURL(file);
 }
-
