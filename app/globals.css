@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@source "../app/**/*.{js,ts,jsx,tsx}";
+@source "../components/**/*.{js,ts,jsx,tsx}";
+@source "../lib/**/*.{js,ts,jsx,tsx}";
+
+
+body {
+  overflow-x: hidden;
+}
+
+.react-transform-component {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Rich Text Content Formatting */
+.rich-text-content {
+  word-break: break-word;
+}
+
+.rich-text-content:empty::before,
+.rich-text-content[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: #9CA3AF;
+  pointer-events: none;
+  font-style: italic;
+}
+
+.rich-text-content ul {
+  list-style-type: disc !important;
+  padding-left: 1.25rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.rich-text-content ol {
+  list-style-type: decimal !important;
+  padding-left: 1.25rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.rich-text-content li {
+  margin-bottom: 0.125rem;
+}
+
+.rich-text-content blockquote {
+  border-left: 3px solid #B58D3D;
+  padding-left: 0.5rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.rich-text-content p {
+  margin-bottom: 0.25rem;
+}
+
