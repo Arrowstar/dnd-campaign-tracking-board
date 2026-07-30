@@ -141,7 +141,7 @@ export default function FocusDrawer({
 
   // ── Preview field selector ─────────────────────────────────────────────────
   const togglePreviewField = (fieldId: string) => {
-    if (!item) return;
+    if (!item || !canEdit) return;
     const current = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
     const next = current.includes(fieldId)
       ? current.filter(f => f !== fieldId)
@@ -211,15 +211,22 @@ export default function FocusDrawer({
 
             {/* Visibility badge */}
             <div className="relative ml-auto">
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setShowVisibilityMenu(!showVisibilityMenu); }}
-                className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 transition-colors cursor-pointer"
-                title={`Visibility: ${currentVisibility.label}`}
-              >
-                <CurrentVisIcon size={11} className={currentVisibility.iconColor} />
-                <span className="text-[10px] text-[#C9C0B1]">{currentVisibility.label}</span>
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowVisibilityMenu(!showVisibilityMenu); }}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 transition-colors cursor-pointer"
+                  title={`Visibility: ${currentVisibility.label}`}
+                >
+                  <CurrentVisIcon size={11} className={currentVisibility.iconColor} />
+                  <span className="text-[10px] text-[#C9C0B1]">{currentVisibility.label}</span>
+                </button>
+              ) : (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 text-[10px] text-[#C9C0B1]">
+                  <CurrentVisIcon size={11} className={currentVisibility.iconColor} />
+                  {currentVisibility.label}
+                </span>
+              )}
               {showVisibilityMenu && canEdit && (
                 <div className="absolute top-full right-0 mt-1 bg-[#2C2824] border border-[#B58D3D]/40 rounded-lg shadow-2xl py-1 z-50 w-40">
                   {VISIBILITY_OPTIONS.filter(opt => !(user.role === 'player' && opt.id === 'dm')).map(opt => (
@@ -241,7 +248,7 @@ export default function FocusDrawer({
 
           {/* Row 3: Tab bar */}
           <div className="flex gap-1 mt-1">
-            {(['content', 'preview', 'comments'] as const).map(tab => (
+            {(['content', ...(canEdit ? ['preview'] : []), 'comments'] as ('content' | 'preview' | 'comments')[]).map(tab => (
               <button
                 key={tab}
                 type="button"

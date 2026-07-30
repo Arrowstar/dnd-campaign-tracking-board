@@ -549,6 +549,10 @@ export default function Board({ boardId }: { boardId: string }) {
   };
 
   const handleUpdateItem = useCallback((updatedItem: BoardItemType) => {
+    // Permission guard: only the owner or DM may mutate an item.
+    const existing = items.find(i => i.id === updatedItem.id);
+    if (existing && user && user.role !== 'dm' && existing.ownerId !== user.id) return;
+
     const newItems = items.map(i => i.id === updatedItem.id ? updatedItem : i);
     const currentAnns = activeTab.annotations || [];
     let annChanged = false;
@@ -567,9 +571,13 @@ export default function Board({ boardId }: { boardId: string }) {
       };
     });
     saveState(newItems, connections, annChanged ? newAnns : undefined);
-  }, [items, activeTab.annotations, dragOffsets, itemDimensions, connections, saveState]);
+  }, [items, user, activeTab.annotations, dragOffsets, itemDimensions, connections, saveState]);
 
   const handleDeleteItem = useCallback((id: string) => {
+    // Permission guard: only the owner or DM may delete an item.
+    const existing = items.find(i => i.id === id);
+    if (existing && user && user.role !== 'dm' && existing.ownerId !== user.id) return;
+
     const newItems = items.filter(i => i.id !== id);
     const newConns = connections.filter(c => c.fromId !== id && c.toId !== id);
     const currentAnns = activeTab.annotations || [];
@@ -592,7 +600,7 @@ export default function Board({ boardId }: { boardId: string }) {
       };
     });
     saveState(newItems, newConns, annChanged ? newAnns : undefined);
-  }, [items, connections, activeTab.annotations, dragOffsets, itemDimensions, saveState]);
+  }, [items, user, connections, activeTab.annotations, dragOffsets, itemDimensions, saveState]);
 
   const handleItemClick = useCallback((id: string) => {
     if (isAddingConnection) {
