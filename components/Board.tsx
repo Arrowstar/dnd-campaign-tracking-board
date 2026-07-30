@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
-import { fileToCompressedDataURL } from '@/lib/utils';
+import { uploadFileToBlob } from '@/lib/utils';
 import { io } from 'socket.io-client';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
@@ -47,6 +47,9 @@ export default function Board({ boardId }: { boardId: string }) {
   // Modals
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
+
+  // Persistence status — surfaced in the UI instead of silently swallowed
+  const [saveError, setSaveError] = useState(false);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0] || {
     id: 'default-tab',
@@ -253,21 +256,36 @@ export default function Board({ boardId }: { boardId: string }) {
     };
   }, [boardId, user]);
 
+  // All saves are chained onto this promise so requests hit the server strictly
+  // in order — otherwise two concurrent saves can resolve out of order and an
+  // older snapshot can silently overwrite a newer one.
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const persistBoardState = useCallback(
-    async (updatedTabs: BoardTab[]) => {
+    (updatedTabs: BoardTab[]) => {
       if (!user?.sessionToken) return;
-      try {
-        await fetch(`/api/boards/${boardId}/state`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${user.sessionToken}`,
-          },
-          body: JSON.stringify({ tabs: updatedTabs }),
-        });
-      } catch (err) {
-        console.error('Error saving board state:', err);
-      }
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        try {
+          const res = await fetch(`/api/boards/${boardId}/state`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${user.sessionToken}`,
+            },
+            body: JSON.stringify({ tabs: updatedTabs }),
+          });
+          if (!res.ok) {
+            const detail = await res.text().catch(() => '');
+            console.error('Board save failed:', res.status, detail);
+            setSaveError(true);
+            return;
+          }
+          setSaveError(false);
+        } catch (err) {
+          console.error('Error saving board state:', err);
+          setSaveError(true);
+        }
+      });
     },
     [boardId, user?.sessionToken]
   );
@@ -507,8 +525,8 @@ export default function Board({ boardId }: { boardId: string }) {
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
       try {
-        const dataUrl = await fileToCompressedDataURL(file);
-        saveState([...items, { ...newItemBase, content: dataUrl }], connections);
+        const imageUrl = await uploadFileToBlob(file);
+        saveState([...items, { ...newItemBase, content: imageUrl }], connections);
       } catch (err) {
         console.error('Error processing canvas-dropped image:', err);
       }
@@ -732,6 +750,11 @@ export default function Board({ boardId }: { boardId: string }) {
 
   return (
     <div className="w-screen h-screen bg-[#F5F2ED] overflow-hidden relative font-sans text-[#423D38] flex flex-col">
+      {saveError && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-red-600 text-white text-sm text-center py-1.5 px-4">
+          Your last change couldn&apos;t be saved. Check your connection — retrying automatically.
+        </div>
+      )}
       <Toolbar 
         user={user} 
         isAddingConnection={isAddingConnection}

@@ -7,7 +7,7 @@ import {
   Trash2, MessageSquare, Lock, Globe, Eye,
   User as UserIcon, Minimize2, Maximize2, ExternalLink, Upload,
 } from 'lucide-react';
-import { fileToCompressedDataURL } from '@/lib/utils';
+import { uploadFileToBlob } from '@/lib/utils';
 
 import { RichTextDisplay } from './RichTextEditor';
 import { parseStructured, buildDefaultFields } from './StructuredBoardItemFields';
@@ -456,21 +456,21 @@ export default memo(function BoardItem({
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
       try {
-        const dataUrl = await fileToCompressedDataURL(file);
+        const imageUrl = await uploadFileToBlob(file);
         if (item.type === 'image') {
-          onUpdate({ ...item, content: dataUrl });
+          onUpdate({ ...item, content: imageUrl });
         } else {
           // Update the first image-type field
           const currentFields = resolvedFields;
           const imgField = currentFields.find(f => f.type === 'image');
           if (imgField) {
             const updatedFields = currentFields.map(f =>
-              f.id === imgField.id ? { ...f, imageUrl: dataUrl } : f
+              f.id === imgField.id ? { ...f, imageUrl } : f
             );
             onUpdate({ ...item, fields: updatedFields });
           } else {
             // Fallback: set content for non-image typed items that have no image field
-            onUpdate({ ...item, content: dataUrl });
+            onUpdate({ ...item, content: imageUrl });
           }
         }
       } catch (err) {
