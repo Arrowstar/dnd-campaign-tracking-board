@@ -1,34 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSql, ensureBoardsTable } from '@/lib/db';
+import { getSql, ensureSchema } from '@/lib/db';
+import { getAuthUser, hashPassword } from '@/lib/auth';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { boardId } = body;
+    const user = await getAuthUser(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { boardId, boardPassword } = (await request.json()) as {
+      boardId?: string;
+      boardPassword?: string;
+    };
 
     if (!boardId) {
-      return NextResponse.json({ error: 'Board ID is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Board ID is required.' }, { status: 400 });
+    }
+    const cleanId = boardId.trim().toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(cleanId) || cleanId.length < 2 || cleanId.length > 48) {
+      return NextResponse.json(
+        { error: 'Board ID must be 2–48 lowercase letters, numbers, or hyphens.' },
+        { status: 400 }
+      );
     }
 
-    if (process.env.DATABASE_URL) {
-      await ensureBoardsTable();
-      const sql = getSql();
-      const defaultState = JSON.stringify({
-        tabs: [
-          { id: 'default-tab', name: 'Main Board', color: '#3B82F6', items: [], connections: [] }
-        ]
-      });
+    await ensureSchema();
+    const sql = getSql();
 
-      await sql`
-        INSERT INTO boards (id, data, updated_at)
-        VALUES (${boardId}, ${defaultState}::jsonb, NOW())
-        ON CONFLICT (id) DO NOTHING
-      `;
+    const existing = await sql`SELECT id FROM boards WHERE id = ${cleanId} LIMIT 1`;
+    if (existing.length > 0) {
+      return NextResponse.json({ error: 'A board with that ID already exists.' }, { status: 409 });
     }
 
-    return NextResponse.json({ success: true, boardId });
-  } catch (error: any) {
-    console.error('Error creating board:', error);
-    return NextResponse.json({ success: true });
+    const members = { [user.id]: { role: 'dm', joinedAt: new Date().toISOString() } };
+    const tabs = [{ id: 'default-tab', name: 'Main Board', color: '#3B82F6', items: [], connections: [] }];
+
+    let boardPasswordHash: string | null = null;
+    let boardPasswordSalt: string | null = null;
+    if (boardPassword && boardPassword.trim()) {
+      const bPass = await hashPassword(boardPassword);
+      boardPasswordHash = bPass.hash;
+      boardPasswordSalt = bPass.salt;
+    }
+
+    await sql`
+      INSERT INTO boards (id, board_password_hash, board_password_salt, members, tabs)
+      VALUES (
+        ${cleanId},
+        ${boardPasswordHash},
+        ${boardPasswordSalt},
+        ${JSON.stringify(members)}::jsonb,
+        ${JSON.stringify(tabs)}::jsonb
+      )
+    `;
+
+    return NextResponse.json({ success: true, boardId: cleanId, role: 'dm' });
+  } catch (err) {
+    console.error('Create board error:', err);
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
   }
 }

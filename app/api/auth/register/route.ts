@@ -1,0 +1,57 @@
+import crypto from 'crypto';
+import { NextRequest, NextResponse } from 'next/server';
+import { getSql, ensureSchema } from '@/lib/db';
+import { hashPassword, generateToken } from '@/lib/auth';
+
+export const runtime = 'nodejs';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { username, password } = (await request.json()) as { username?: string; password?: string };
+
+    if (!username || !password) {
+      return NextResponse.json({ error: 'Username and password are required.' }, { status: 400 });
+    }
+    if (username.trim().length < 2 || username.trim().length > 32) {
+      return NextResponse.json({ error: 'Username must be 2–32 characters.' }, { status: 400 });
+    }
+    if (!/^[a-zA-Z0-9_\- ]+$/.test(username)) {
+      return NextResponse.json(
+        { error: 'Username may only contain letters, numbers, spaces, hyphens, and underscores.' },
+        { status: 400 }
+      );
+    }
+    if (password.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 });
+    }
+
+    await ensureSchema();
+    const sql = getSql();
+
+    const lowerUsername = username.trim().toLowerCase();
+    const existing = await sql`SELECT id FROM users WHERE username = ${lowerUsername} LIMIT 1`;
+    if (existing.length > 0) {
+      return NextResponse.json({ error: 'That username is already taken.' }, { status: 409 });
+    }
+
+    const { hash, salt } = await hashPassword(password);
+    const userId = crypto.randomUUID();
+    const displayName = username.trim();
+
+    await sql`
+      INSERT INTO users (id, username, display_name, password_hash, salt)
+      VALUES (${userId}, ${lowerUsername}, ${displayName}, ${hash}, ${salt})
+    `;
+
+    const sessionToken = generateToken();
+    await sql`INSERT INTO sessions (token, user_id) VALUES (${sessionToken}, ${userId})`;
+
+    return NextResponse.json({
+      sessionToken,
+      user: { id: userId, username: lowerUsername, displayName },
+    });
+  } catch (err) {
+    console.error('Register error:', err);
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
+  }
+}
