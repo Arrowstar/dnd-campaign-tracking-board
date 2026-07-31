@@ -19,6 +19,16 @@ import { io } from 'socket.io-client';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
 
+const BOARD_ITEM_LOD_THRESHOLDS = {
+  fullWidth: 130,
+  fullHeight: 90,
+  fullExpandWidth: 145,
+  fullExpandHeight: 100,
+  pinSize: 45,
+  pinExpandSize: 56,
+  pinScreenSize: 36,
+};
+
 function getBoxIntersection(cx: number, cy: number, hw: number, hh: number, targetCx: number, targetCy: number) {
   const dx = targetCx - cx;
   const dy = targetCy - cy;
@@ -1337,6 +1347,7 @@ export default function Board({ boardId }: { boardId: string }) {
                         allItems={allBoardItems}
                         onScrollToItem={handleScrollToItem}
                         zoomScale={zoomScale / 100}
+                        lodThresholds={BOARD_ITEM_LOD_THRESHOLDS}
                         onOpenFocus={handleOpenFocus}
                       />
                     );

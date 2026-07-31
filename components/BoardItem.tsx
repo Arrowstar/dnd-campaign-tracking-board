@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useRef, useEffect, memo } from 'react';
@@ -7,6 +6,8 @@ import { BoardItem as BoardItemType, User, ItemField } from '@/lib/types';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
   User as UserIcon, Minimize2, Maximize2, ExternalLink, Upload,
+  Image as ImageIcon, MapPin, Users, CalendarDays, FileText,
+  BookOpen, Package, Clock, Crown, ScrollText,
 } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 
@@ -247,30 +248,39 @@ function stripHtml(html: string): string {
 // keeps cards compact while giving the title reliable room to breathe.
 const MIN_ITEM_WIDTH = 200;
 
-// ── Level-of-Detail thresholds (with hysteresis gaps) ────────────────────────
-const TIER0_THRESHOLD = 130;  // full card
-const TIER0_HYSTERESIS = 145; // expand back up only above this
-const TIER1_THRESHOLD = 45;  // image-forward compact / pin boundary
-const TIER1_HYSTERESIS = 55; // expand back to tier 1 only above this
+type BoardItemLodTier = 'full' | 'image' | 'pin';
 
-function getTier(
-  effW: number,
-  hasImage: boolean,
-  prevTier?: number
-): number {
-  if (prevTier === 2) {
-    if (effW >= TIER0_HYSTERESIS) return 0;
-    if (effW >= TIER1_HYSTERESIS) return 1;
-    return 2;
-  }
-  if (prevTier === 1) {
-    if (effW >= TIER0_THRESHOLD) return 0;
-    if (effW < TIER1_THRESHOLD) return 2;
-    return 1;
-  }
-  if (effW >= TIER0_THRESHOLD) return 0;
-  if (hasImage && effW >= TIER1_THRESHOLD) return 1;
-  return 2;
+export interface BoardItemLodThresholds {
+  /** Collapse text-heavy/full cards once their rendered width falls below this many screen pixels. */
+  fullWidth: number;
+  /** Collapse full cards once their rendered height falls below this many screen pixels. Ignored for manually minimized cards. */
+  fullHeight: number;
+  /** Expand back to full only after this wider rendered width is reached. Prevents flicker near the boundary. */
+  fullExpandWidth: number;
+  /** Expand back to full only after this taller rendered height is reached. Prevents flicker near the boundary. */
+  fullExpandHeight: number;
+  /** Collapse image-forward compact cards to pins once either rendered dimension falls below this many screen pixels. */
+  pinSize: number;
+  /** Expand pins back to image-forward compact cards only after both rendered dimensions exceed this many screen pixels. */
+  pinExpandSize: number;
+  /** Visual pin diameter in screen pixels. It is inversely scaled so pins stay usable while zoomed out. */
+  pinScreenSize: number;
+}
+
+export const BOARD_ITEM_DEFAULT_LOD_THRESHOLDS: BoardItemLodThresholds = {
+  fullWidth: 130,
+  fullHeight: 90,
+  fullExpandWidth: 145,
+  fullExpandHeight: 100,
+  pinSize: 45,
+  pinExpandSize: 56,
+  pinScreenSize: 36,
+};
+
+interface PrimaryImagePreview {
+  imageUrl: string;
+  alt: string;
+  objectClassName: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,6 +304,8 @@ interface BoardItemProps {
   onScrollToItem?: (id: string) => void;
   /** Current canvas zoom scale (decimal, e.g. 1.0 = 100%) */
   zoomScale?: number;
+  /** Per-item level-of-detail thresholds, expressed in rendered screen pixels. */
+  lodThresholds?: BoardItemLodThresholds;
   /** Called when user wants to open the focus drawer for this item */
   onOpenFocus?: (id: string) => void;
 }
@@ -442,6 +454,120 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
   return null;
 }
 
+function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[]): PrimaryImagePreview | null {
+  if (item.type === 'image' && item.content) {
+    return {
+      imageUrl: item.content,
+      alt: item.title || 'Image',
+      objectClassName: 'object-contain object-center',
+    };
+  }
+
+  const imageField = resolvedFields.find(f => f.type === 'image' && !!f.imageUrl);
+  if (!imageField?.imageUrl) return null;
+
+  const imageFieldId = imageField.id.toLowerCase();
+  const shouldContain =
+    item.type === 'location' ||
+    item.type === 'faction' ||
+    imageFieldId.includes('map') ||
+    imageFieldId.includes('emblem') ||
+    imageFieldId.includes('banner');
+
+  return {
+    imageUrl: imageField.imageUrl,
+    alt: imageField.label || item.title || 'Image',
+    objectClassName: shouldContain ? 'object-contain object-center' : 'object-cover object-top',
+  };
+}
+
+function resolveBoardItemLodTier({
+  previousTier,
+  hasImage,
+  isMinimized,
+  effectiveWidth,
+  effectiveHeight,
+  thresholds,
+}: {
+  previousTier?: BoardItemLodTier;
+  hasImage: boolean;
+  isMinimized: boolean;
+  effectiveWidth: number;
+  effectiveHeight: number;
+  thresholds: BoardItemLodThresholds;
+}): BoardItemLodTier {
+  // Manually minimized cards intentionally only need enough width for their
+  // header/title. Height thresholds would otherwise turn every minimized card
+  // into a pin even at normal zoom because the visible header is short.
+  const fullCollapseOk =
+    effectiveWidth >= thresholds.fullWidth &&
+    (isMinimized || effectiveHeight >= thresholds.fullHeight);
+  const fullExpandOk =
+    effectiveWidth >= thresholds.fullExpandWidth &&
+    (isMinimized || effectiveHeight >= thresholds.fullExpandHeight);
+
+  const pinCollapse =
+    effectiveWidth < thresholds.pinSize ||
+    (!isMinimized && effectiveHeight < thresholds.pinSize);
+  const pinExpand =
+    effectiveWidth >= thresholds.pinExpandSize &&
+    (isMinimized || effectiveHeight >= thresholds.pinExpandSize);
+
+  if (!previousTier) {
+    if (fullCollapseOk) return 'full';
+    if (hasImage && !pinCollapse) return 'image';
+    return 'pin';
+  }
+
+  if (previousTier === 'full') {
+    if (fullCollapseOk) return 'full';
+    if (hasImage && !pinCollapse) return 'image';
+    return 'pin';
+  }
+
+  if (previousTier === 'image') {
+    if (fullExpandOk) return 'full';
+    if (!hasImage || pinCollapse) return 'pin';
+    return 'image';
+  }
+
+  // previousTier === 'pin'
+  if (fullExpandOk) return 'full';
+  if (hasImage && pinExpand) return 'image';
+  return 'pin';
+}
+
+function BoardItemTypeIcon({ type, size, className }: { type: BoardItemType['type']; size: number; className?: string }) {
+  switch (type) {
+    case 'character':
+      return <UserIcon size={size} className={className} strokeWidth={2.4} />;
+    case 'npc':
+      return <Users size={size} className={className} strokeWidth={2.4} />;
+    case 'faction':
+      return <Crown size={size} className={className} strokeWidth={2.4} />;
+    case 'event':
+      return <CalendarDays size={size} className={className} strokeWidth={2.4} />;
+    case 'location':
+      return <MapPin size={size} className={className} strokeWidth={2.4} />;
+    case 'session':
+      return <BookOpen size={size} className={className} strokeWidth={2.4} />;
+    case 'quest':
+      return <ScrollText size={size} className={className} strokeWidth={2.4} />;
+    case 'note':
+      return <FileText size={size} className={className} strokeWidth={2.4} />;
+    case 'rule':
+      return <BookOpen size={size} className={className} strokeWidth={2.4} />;
+    case 'loot':
+      return <Package size={size} className={className} strokeWidth={2.4} />;
+    case 'downtime':
+      return <Clock size={size} className={className} strokeWidth={2.4} />;
+    case 'image':
+      return <ImageIcon size={size} className={className} strokeWidth={2.4} />;
+    default:
+      return <FileText size={size} className={className} strokeWidth={2.4} />;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BoardItem
 // ─────────────────────────────────────────────────────────────────────────────
@@ -462,6 +588,7 @@ export default memo(function BoardItem({
   allItems = [],
   onScrollToItem,
   zoomScale = 1,
+  lodThresholds,
   onOpenFocus,
 }: BoardItemProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -492,11 +619,13 @@ export default memo(function BoardItem({
   const currentVisOpt = visibilityOpts.find(o => o.id === item.visibility) || visibilityOpts[0];
   const CurrentIcon = currentVisOpt.icon;
 
+  const safeZoomScale = Math.max(0.05, zoomScale || 1);
+
   // Zoom-scaled title font: larger when zoomed out so text stays legible
   // At 100% zoom → 13px. At 50% zoom → 16px (cap). At 200% → ~10px (floor).
   // Capped at 16 (was 20) so the title text can't grow large enough to
   // starve the rest of the header row (badge/controls) of space.
-  const titleFontSize = Math.min(16, Math.max(10, 13 / zoomScale));
+  const titleFontSize = Math.min(16, Math.max(10, 13 / safeZoomScale));
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewFieldIds = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
@@ -510,12 +639,42 @@ export default memo(function BoardItem({
     return defaults.map(def => saved.find(s => s.id === def.id) ?? def);
   })();
 
-  // Per-item LOD tier based on rendered pixel size (computed after resolvedFields)
-  const prevTierRef = useRef<number>(0);
-  const effW = item.width * zoomScale;
-  const hasImage = item.type === 'image' || resolvedFields.some(f => f.type === 'image' && !!f.imageUrl);
-  const tier = getTier(effW, hasImage, prevTierRef.current);
-  prevTierRef.current = tier;
+  const thresholds = lodThresholds ?? BOARD_ITEM_DEFAULT_LOD_THRESHOLDS;
+  const primaryImage = getPrimaryImagePreview(item, resolvedFields);
+  // A manually minimized card should stay header-only until it gets truly
+  // tiny; don't unexpectedly expand it into the image-forward tier.
+  const hasImageForLod = !item.minimized && !!primaryImage;
+  const effectiveWidth = item.width * safeZoomScale;
+  const effectiveHeight = (item.height || 200) * safeZoomScale;
+  const [lodTier, setLodTier] = useState<BoardItemLodTier>(() => resolveBoardItemLodTier({
+    hasImage: hasImageForLod,
+    isMinimized: !!item.minimized,
+    effectiveWidth,
+    effectiveHeight,
+    thresholds,
+  }));
+
+  useEffect(() => {
+    setLodTier(prev => resolveBoardItemLodTier({
+      previousTier: prev,
+      hasImage: hasImageForLod,
+      isMinimized: !!item.minimized,
+      effectiveWidth,
+      effectiveHeight,
+      thresholds,
+    }));
+  }, [
+    hasImageForLod,
+    item.minimized,
+    effectiveWidth,
+    effectiveHeight,
+    thresholds.fullWidth,
+    thresholds.fullHeight,
+    thresholds.fullExpandWidth,
+    thresholds.fullExpandHeight,
+    thresholds.pinSize,
+    thresholds.pinExpandSize,
+  ]);
 
   // ── Drag-and-drop image onto this card ──────────────────────────────────────
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -575,6 +734,48 @@ export default memo(function BoardItem({
     resolvedFields.some(f => f.type === 'image')
   );
 
+  const handleItemPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (!canEdit) return;
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA' ||
+      target.closest('input, button, textarea, a, select, [data-no-drag]')) return;
+    e.stopPropagation();
+    const handleEl = e.currentTarget;
+    try { handleEl.setPointerCapture(e.pointerId); } catch { /* noop */ }
+
+    const startPointerX = e.clientX;
+    const startPointerY = e.clientY;
+    const scale = (() => {
+      const w = document.querySelector('.react-transform-component');
+      if (w) {
+        const m = w.getAttribute('style')?.match(/scale\(([^)]+)\)/);
+        if (m && m[1]) return parseFloat(m[1]);
+      }
+      return 1;
+    })();
+    let currentDx = 0, currentDy = 0;
+    onDragStart?.();
+
+    const handlePointerMove = (mv: PointerEvent) => {
+      currentDx = (mv.clientX - startPointerX) / scale;
+      currentDy = (mv.clientY - startPointerY) / scale;
+      onDragMove?.(item.id, currentDx, currentDy);
+    };
+    const handlePointerUp = (up: PointerEvent) => {
+      try { handleEl.releasePointerCapture(up.pointerId); } catch { /* noop */ }
+      handleEl.removeEventListener('pointermove', handlePointerMove);
+      handleEl.removeEventListener('pointerup', handlePointerUp);
+      handleEl.removeEventListener('pointercancel', handlePointerUp);
+      if (currentDx !== 0 || currentDy !== 0) {
+        onUpdate({ ...item, x: item.x + currentDx, y: item.y + currentDy });
+      }
+      onDragEnd?.(item.id);
+    };
+    handleEl.addEventListener('pointermove', handlePointerMove);
+    handleEl.addEventListener('pointerup', handlePointerUp);
+    handleEl.addEventListener('pointercancel', handlePointerUp);
+  };
+
   // Resize handler
   const handleResize = (e: React.PointerEvent, direction: string) => {
     if (!canEdit) return;
@@ -625,6 +826,24 @@ export default memo(function BoardItem({
     document.addEventListener('pointerup', onUp);
   };
 
+  const renderFullCard = lodTier === 'full';
+  const renderImageCompactCard = lodTier === 'image' && !!primaryImage;
+  const renderPinCard = lodTier === 'pin';
+  const pinDiameter = thresholds.pinScreenSize / safeZoomScale;
+  const pinIconSize = 18 / safeZoomScale;
+  const pinLabelWidth = 150 / safeZoomScale;
+  const pinFontSize = 11 / safeZoomScale;
+  const pinLineHeight = 14 / safeZoomScale;
+  const compactCaptionFontSize = 11 / safeZoomScale;
+  const compactCaptionPaddingY = 4 / safeZoomScale;
+  const compactCaptionPaddingX = 6 / safeZoomScale;
+  const compactTypeFontSize = 8 / safeZoomScale;
+  const lodShellHeight = renderFullCard && item.minimized
+    ? undefined
+    : renderPinCard && item.minimized
+    ? 32
+    : item.height;
+
   return (
     <motion.div
       id={item.id}
@@ -634,10 +853,12 @@ export default memo(function BoardItem({
         left: `${item.x + (dragOffset?.x || 0)}px`,
         top: `${item.y + (dragOffset?.y || 0)}px`,
         width: item.width,
-        height: item.minimized ? undefined : item.height,
-        minHeight: item.minimized ? undefined : item.height,
-        backgroundColor: isLight ? itemColor : '#FFFFFF',
-        borderLeft: isFocused
+        height: lodShellHeight,
+        minHeight: lodShellHeight,
+        backgroundColor: renderPinCard ? 'transparent' : isLight ? itemColor : '#FFFFFF',
+        borderLeft: renderPinCard
+          ? 'none'
+          : isFocused
           ? '2px solid #B58D3D'
           : isSelected
           ? '2px solid #B58D3D'
@@ -646,7 +867,9 @@ export default memo(function BoardItem({
           : isLight
           ? '1px solid rgba(0,0,0,0.18)'
           : `1.5px solid ${itemColor}80`,
-        borderRight: isFocused
+        borderRight: renderPinCard
+          ? 'none'
+          : isFocused
           ? '2px solid #B58D3D'
           : isSelected
           ? '2px solid #B58D3D'
@@ -655,7 +878,9 @@ export default memo(function BoardItem({
           : isLight
           ? '1px solid rgba(0,0,0,0.18)'
           : `1.5px solid ${itemColor}80`,
-        borderBottom: isFocused
+        borderBottom: renderPinCard
+          ? 'none'
+          : isFocused
           ? '2px solid #B58D3D'
           : isSelected
           ? '2px solid #B58D3D'
@@ -664,7 +889,9 @@ export default memo(function BoardItem({
           : isLight
           ? '1px solid rgba(0,0,0,0.18)'
           : `1.5px solid ${itemColor}80`,
-        borderTop: isFocused
+        borderTop: renderPinCard
+          ? 'none'
+          : isFocused
           ? '4px solid #B58D3D'
           : isSelected
           ? '4px solid #B58D3D'
@@ -673,17 +900,19 @@ export default memo(function BoardItem({
           : isLight
           ? '4px solid rgba(0,0,0,0.2)'
           : `4px solid ${itemColor}`,
-        borderRadius: '6px',
+        borderRadius: renderPinCard ? 0 : '6px',
         color: isLight ? '#1F2937' : '#2C2824',
         zIndex: isFocused ? 15 : isSelected ? 10 : isDraggingOver ? 12 : 1,
-        overflow: item.minimized ? 'hidden' : 'visible',
-        boxShadow: isDraggingOver
+        overflow: renderPinCard ? 'visible' : renderImageCompactCard ? 'hidden' : item.minimized ? 'hidden' : 'visible',
+        boxShadow: renderPinCard
+          ? 'none'
+          : isDraggingOver
           ? '0 0 0 3px #B58D3D66, 0 8px 32px rgba(181,141,61,0.25)'
           : isFocused
           ? '0 0 0 2px #B58D3D55, 0 8px 32px rgba(0,0,0,0.18)'
           : '0 4px 16px rgba(0,0,0,0.12)',
       }}
-      className="flex flex-col nodrag transition-shadow duration-200"
+      className={`${renderPinCard ? '' : 'flex flex-col'} nodrag transition-shadow duration-200`}
       onClick={() => onClick(item.id)}
       onDragOver={(e) => {
         if (!canAcceptImageDrop) return;
@@ -697,45 +926,112 @@ export default memo(function BoardItem({
       }}
       onDrop={canAcceptImageDrop ? handleCardDrop : undefined}
     >
-      {/* Tier 2 — Pin / Badge */}
-      {tier === 2 && (
+      {renderPinCard && (
         <div
-          className="w-full h-full rounded-full flex flex-col items-center justify-center overflow-hidden shadow-lg relative"
-          style={{ backgroundColor: itemColor }}
-          title={`${item.title} (${item.type})`}
+          className={`absolute flex flex-col items-center gap-1 select-none ${canEdit ? 'cursor-move' : 'cursor-pointer'}`}
+          style={{
+            left: '50%',
+            top: '50%',
+            width: pinLabelWidth,
+            transform: 'translate(-50%, -50%)',
+          }}
+          onPointerDown={handleItemPointerDown}
+          onDoubleClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
+          title={`${item.title || 'Untitled'} (${item.type})`}
         >
-          <span className="text-white text-[9px] font-bold uppercase tracking-wide opacity-90">{item.type}</span>
-          <span className="text-white text-[7px] font-serif italic truncate px-1 text-center leading-tight">{item.title}</span>
-          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#F5F2ED] border border-[#B58D3D] flex items-center justify-center">
-            <span className="text-[5px] font-black text-[#B58D3D]">{item.type[0]?.toUpperCase()}</span>
+          <div
+            className="flex items-center justify-center rounded-full text-white"
+            style={{
+              width: pinDiameter,
+              height: pinDiameter,
+              backgroundColor: itemColor,
+              color: isLight ? '#1F2937' : '#FFFFFF',
+              border: `${Math.max(1, 1.5 / safeZoomScale)}px solid ${isFocused || isSelected ? '#B58D3D' : 'rgba(255,255,255,0.75)'}`,
+              boxShadow: isFocused || isSelected
+                ? `0 0 0 ${2 / safeZoomScale}px #B58D3D66, 0 ${5 / safeZoomScale}px ${16 / safeZoomScale}px rgba(0,0,0,0.28)`
+                : `0 ${4 / safeZoomScale}px ${12 / safeZoomScale}px rgba(0,0,0,0.22)`,
+            }}
+          >
+            <BoardItemTypeIcon type={item.type} size={pinIconSize} className="drop-shadow-sm" />
           </div>
+          <span
+            className="block truncate rounded-full bg-[#F5F2ED]/95 font-bold text-[#2C2824] shadow-sm ring-1 ring-black/10"
+            style={{
+              maxWidth: pinLabelWidth,
+              fontSize: pinFontSize,
+              lineHeight: `${pinLineHeight}px`,
+              padding: `${1.5 / safeZoomScale}px ${6 / safeZoomScale}px`,
+            }}
+          >
+            {item.title || 'Untitled'}
+          </span>
+          {isDraggingOver && (
+            <div
+              className="absolute rounded-full pointer-events-none"
+              style={{
+                inset: `${-6 / safeZoomScale}px`,
+                border: `${2 / safeZoomScale}px dashed #B58D3D`,
+                background: 'rgba(181,141,61,0.12)',
+              }}
+            />
+          )}
         </div>
       )}
 
-      {/* Tier 1 — Image-forward compact */}
-      {tier === 1 && (
-        <>
-          <div className="flex-1 overflow-hidden relative">
-            {(() => {
-              const imgField = resolvedFields.find(f => f.type === 'image' && f.imageUrl);
-              const url = imgField?.imageUrl || (item.type === 'image' ? item.content : null);
-              if (url) {
-                return (
-                  <img src={url} alt={item.title} className="w-full h-full object-cover object-top pointer-events-none select-none" />
-                );
-              }
-              return <div className="w-full h-full flex items-center justify-center bg-[#F5F2ED] text-[8px] font-bold text-[#8C7B6E]">{item.title}</div>;
-            })()}
+      {renderImageCompactCard && primaryImage && (
+        <div
+          className={`relative w-full h-full overflow-hidden rounded-[5px] select-none group ${canEdit ? 'cursor-move' : 'cursor-pointer'}`}
+          onPointerDown={handleItemPointerDown}
+          onDoubleClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
+          title={`${item.title || 'Untitled'} (${item.type})`}
+        >
+          <img
+            src={primaryImage.imageUrl}
+            alt={primaryImage.alt}
+            draggable={false}
+            className={`w-full h-full ${primaryImage.objectClassName} pointer-events-none select-none`}
+          />
+          <div
+            className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-gradient-to-t from-black/75 via-black/45 to-transparent text-white"
+            style={{
+              padding: `${compactCaptionPaddingY}px ${compactCaptionPaddingX}px`,
+              minHeight: 24 / safeZoomScale,
+            }}
+          >
+            <span
+              className="font-bold font-serif italic truncate flex-1 min-w-0 drop-shadow"
+              style={{ fontSize: compactCaptionFontSize, lineHeight: 1.15 }}
+            >
+              {item.title || 'Untitled'}
+            </span>
+            <span
+              className="uppercase font-black tracking-wider rounded bg-white/20 text-white/90 flex-shrink-0"
+              style={{
+                fontSize: compactTypeFontSize,
+                lineHeight: 1,
+                padding: `${2 / safeZoomScale}px ${3 / safeZoomScale}px`,
+              }}
+            >
+              {item.type}
+            </span>
           </div>
-          <div className="px-1.5 py-1 bg-black/10 border-t border-black/5">
-            <span className="block text-[9px] font-bold font-serif italic truncate text-center" style={{ color: itemColor }}>{item.title}</span>
-          </div>
-        </>
+          {isDraggingOver && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none z-20"
+              style={{ background: 'rgba(181,141,61,0.18)', backdropFilter: 'blur(1px)' }}
+            >
+              <Upload size={18 / safeZoomScale} className="text-[#F5E9C8] drop-shadow" />
+              <span
+                className="font-bold text-[#6B4E17] bg-[#F5E9C8]/95 rounded-full shadow-sm"
+                style={{ fontSize: 10 / safeZoomScale, padding: `${2 / safeZoomScale}px ${7 / safeZoomScale}px` }}
+              >
+                Drop image here
+              </span>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Tier 0 — Full card */}
-      {tier === 0 && (
-        <>
+      {renderFullCard && (<>
       {/* ── Header / Drag Handle ── */}
       <div
         style={{
@@ -743,47 +1039,7 @@ export default memo(function BoardItem({
           borderBottom: item.minimized ? 'none' : isLight ? '1px solid rgba(0,0,0,0.1)' : `1px solid ${itemColor}30`,
         }}
         className={`flex items-center justify-between px-2 py-1.5 rounded-t-[5px] select-none gap-1 overflow-hidden ${canEdit ? 'cursor-move' : ''}`}
-        onPointerDown={(e) => {
-          if (!canEdit) return;
-          const target = e.target as HTMLElement;
-          if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA' ||
-            target.closest('input, button, textarea, a, select, [data-no-drag]')) return;
-          e.stopPropagation();
-          const handleEl = e.currentTarget;
-          try { handleEl.setPointerCapture(e.pointerId); } catch { /* noop */ }
-
-          const startPointerX = e.clientX;
-          const startPointerY = e.clientY;
-          const scale = (() => {
-            const w = document.querySelector('.react-transform-component');
-            if (w) {
-              const m = w.getAttribute('style')?.match(/scale\(([^)]+)\)/);
-              if (m && m[1]) return parseFloat(m[1]);
-            }
-            return 1;
-          })();
-          let currentDx = 0, currentDy = 0;
-          onDragStart?.();
-
-          const handlePointerMove = (mv: PointerEvent) => {
-            currentDx = (mv.clientX - startPointerX) / scale;
-            currentDy = (mv.clientY - startPointerY) / scale;
-            onDragMove?.(item.id, currentDx, currentDy);
-          };
-          const handlePointerUp = (up: PointerEvent) => {
-            try { handleEl.releasePointerCapture(up.pointerId); } catch { /* noop */ }
-            handleEl.removeEventListener('pointermove', handlePointerMove);
-            handleEl.removeEventListener('pointerup', handlePointerUp);
-            handleEl.removeEventListener('pointercancel', handlePointerUp);
-            if (currentDx !== 0 || currentDy !== 0) {
-              onUpdate({ ...item, x: item.x + currentDx, y: item.y + currentDy });
-            }
-            onDragEnd?.(item.id);
-          };
-          handleEl.addEventListener('pointermove', handlePointerMove);
-          handleEl.addEventListener('pointerup', handlePointerUp);
-          handleEl.addEventListener('pointercancel', handlePointerUp);
-        }}
+        onPointerDown={handleItemPointerDown}
       >
         {/* Visibility icon */}
         <CurrentIcon size={12} className={`flex-shrink-0 ${currentVisOpt.iconColor} opacity-80`} />
@@ -934,8 +1190,7 @@ export default memo(function BoardItem({
           <span>{item.comments?.length || 0}</span>
         </button>
       </div>
-        </>
-      )}
+      </>)}
     </motion.div>
   );
 });
