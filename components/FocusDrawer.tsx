@@ -774,9 +774,10 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   canEdit: boolean;
   onUpdate: (item: BoardItemType) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ from: number; target: number; active: boolean } | null>(null);
 
-  // Row-based drag reorder: pointer drag on a block, drop before the target row.
+  // Drag reorder: pointer drag on a block, drop before the target row.
   const handleRowPointerDown = (e: React.PointerEvent, from: number) => {
     if (!canEdit) return;
     e.stopPropagation();
@@ -791,15 +792,39 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
         active = true;
         setDrag({ from, target, active });
       }
-      const els = Array.from(document.querySelectorAll<HTMLElement>('[data-mini-preview-row]'));
-      let t = els.length;
-      for (let i = 0; i < els.length; i++) {
-        const r = els[i].getBoundingClientRect();
-        if (mv.clientY < r.top - 2) { t = i; break; }
-        if (mv.clientY <= r.bottom + 2) {
-          t = mv.clientY < r.top + r.height / 2 ? i : i + 1;
-          break;
+      const container = containerRef.current;
+      if (!container) return;
+      const els = Array.from(container.querySelectorAll<HTMLElement>('[data-mini-preview-row]'));
+      if (els.length === 0) return;
+
+      // Group DOM-ordered blocks into visual rows (blocks whose vertical ranges overlap).
+      const rows: number[][] = [[0]];
+      for (let i = 1; i < els.length; i++) {
+        const prev = els[i - 1].getBoundingClientRect();
+        const cur = els[i].getBoundingClientRect();
+        if (cur.top < prev.bottom - 1 && cur.bottom > prev.top + 1) {
+          rows[rows.length - 1].push(i);
+        } else {
+          rows.push([i]);
         }
+      }
+
+      // Find the target: above a row → before its first block; inside a row → by X position.
+      let t = els.length;
+      for (const row of rows) {
+        const rects = row.map(i => els[i].getBoundingClientRect());
+        const top = Math.min(...rects.map(r => r.top));
+        const bottom = Math.max(...rects.map(r => r.bottom));
+        if (mv.clientY < top - 2) { t = row[0]; break; }
+        if (mv.clientY > bottom + 2) continue;
+        let placed = false;
+        for (let k = 0; k < row.length; k++) {
+          const r = rects[k];
+          if (mv.clientX < r.left - 2) { t = row[k]; placed = true; break; }
+          if (mv.clientX <= r.right + 2) { t = mv.clientX < r.left + r.width / 2 ? row[k] : row[k] + 1; placed = true; break; }
+        }
+        if (!placed) t = row[row.length - 1] + 1;
+        break;
       }
       if (t !== target) {
         target = t;
@@ -825,7 +850,7 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   };
 
   return (
-    <div className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: 230 }}>
+    <div ref={containerRef} className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: 230 }}>
       <div className="flex items-center gap-1 bg-[#2C2824] px-2 py-1">
         <span className="text-[8px] font-bold font-serif italic text-white truncate flex-1 min-w-0">{item.title || 'Untitled'}</span>
         <span className="text-[6px] font-bold uppercase tracking-wider text-white/90 bg-white/20 rounded px-1 py-px flex-shrink-0">{item.type}</span>
@@ -854,6 +879,18 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   );
 }
 
+/** Human-readable label for a preview slot, for the mini preview blocks. */
+function previewFieldLabel(item: BoardItemType, slot: PreviewFieldSlot, fieldDefs: FieldDef[] | null): string {
+  if (item.type === 'image' && slot.fieldId === '__image_content__') return 'Image';
+  const def = fieldDefs?.find(d => d.id === slot.fieldId);
+  if (def?.label) return def.label;
+  const field = item.fields?.find(f => f.id === slot.fieldId);
+  if (field?.label) return field.label;
+  const npc = NPC_PREVIEW_FIELD_OPTIONS.find(o => o.id === slot.fieldId);
+  if (npc) return npc.label;
+  return slot.fieldId;
+}
+
 function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEdit, drag, onPointerDown }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
@@ -870,6 +907,7 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEd
   const span = resolveFieldSpan(slot, fieldType, columns, mode);
   const spanStyle = columns === 1 ? undefined : { gridColumn: `span ${span}` };
   const hasContent = hasPreviewContent(item, slot, fieldType, fieldDefs);
+  const label = previewFieldLabel(item, slot, fieldDefs);
 
   const isDragging = drag?.active && drag.from === index;
   const isDropTarget = drag?.active && drag.target === index;
@@ -888,11 +926,14 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEd
 
   if (!hasContent) {
     return (
-    <div {...rootProps} className={rootClass}>
-      <div className="flex items-center justify-center rounded border border-dashed border-[#D9D0C1] h-5 text-[7px] italic text-[#8C7B6E]/70">
-        empty
+      <div {...rootProps} className={rootClass}>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[7px] font-bold uppercase tracking-wide text-[#8C7B6E] truncate" title={label}>{label}</span>
+          <div className="flex items-center justify-center rounded border border-dashed border-[#D9D0C1] h-4 text-[6px] italic text-[#8C7B6E]/70">
+            empty
+          </div>
+        </div>
       </div>
-    </div>
     );
   }
 
@@ -900,8 +941,11 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEd
     const isThumb = mode === 'thumb';
     return (
       <div {...rootProps} className={rootClass}>
-        <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-5' : 'h-9'}`}>
-          <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[7px] font-bold uppercase tracking-wide text-[#8C7B6E] truncate" title={label}>{label}</span>
+          <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-4' : 'h-8'}`}>
+            <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
+          </div>
         </div>
       </div>
     );
@@ -910,10 +954,13 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEd
   const clamp = mode === 'expanded' ? 4 : Math.min(slot.clampLines ?? 2, 4);
   return (
     <div {...rootProps} className={rootClass}>
-      <div className="flex flex-col justify-center gap-0.5 rounded border border-[#F0EDE6] bg-[#FAFAF8] px-1 py-1 min-h-[14px]">
-        {Array.from({ length: clamp }).map((_, i) => (
-          <div key={i} className="h-[3px] rounded bg-[#8C7B6E]/30" style={{ width: `${85 - (i % 3) * 15}%` }} />
-        ))}
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[7px] font-bold uppercase tracking-wide text-[#8C7B6E] truncate" title={label}>{label}</span>
+        <div className="flex flex-col justify-center gap-0.5 rounded border border-[#F0EDE6] bg-[#FAFAF8] px-1 py-1 flex-1 min-h-[14px]">
+          {Array.from({ length: clamp }).map((_, i) => (
+            <div key={i} className="h-[3px] rounded bg-[#8C7B6E]/30" style={{ width: `${85 - (i % 3) * 15}%` }} />
+          ))}
+        </div>
       </div>
     </div>
   );
