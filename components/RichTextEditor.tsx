@@ -691,17 +691,16 @@ function getTextAlignFromAttrs(attrs: string): string | null {
  * Flatten editor HTML into a compact inline-HTML string suitable for
  * line-clamped card previews. Inline formatting (bold, italic, underline,
  * colors, font sizes, highlights, links) is preserved, block boundaries
- * become <br />, and lists/tables collapse into readable text. Images are
- * dropped (cards show them via dedicated image fields).
+ * become <br />, tables collapse into readable rows, images and horizontal
+ * rules are kept inline so they render in the preview.
  */
 export function flattenRichTextForPreview(html: string): string {
   if (!html) return '';
 
   let s = html;
-  // Drop scripts/styles and images entirely.
+  // Drop scripts/styles entirely.
   s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
   s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
-  s = s.replace(/<img[^>]*>/gi, '');
   // Normalize <br> variants.
   s = s.replace(/<br\s*\/?>/gi, '\u0000'); // sentinel: survives trimming, replaced below
   // Block boundaries → line breaks (inline content inside is kept), with
@@ -723,7 +722,7 @@ export function flattenRichTextForPreview(html: string): string {
       else if (entry.kind === 'heading') out += '</strong>';
       return out + '\u0000';
     }
-    if (t === 'hr') return '\u0000';
+    if (t === 'hr') return '<hr class="rt-preview-hr" />';
     let out = '';
     let kind = 'other';
     if (t === 'blockquote') { out += '<span class="rt-preview-quote">'; kind = 'quote'; }
