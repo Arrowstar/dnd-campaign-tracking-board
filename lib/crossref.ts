@@ -208,6 +208,33 @@ export function retitleLinksInValue(value: string, titleById: Map<string, string
 }
 
 /**
+ * Retitle link tokens inside a single field value, handling both storage
+ * shapes:
+ *  - Direct: the whole value is a token list (`@@MULTILINK:...` / `@@LINK:...`)
+ *  - Structured: the value is a JSON object whose string sub-values are
+ *    token lists (one entry per structured sub-field key).
+ */
+function retitleLinksInFieldValue(value: string, titleById: Map<string, string>): string {
+  const direct = retitleLinksInValue(value, titleById);
+  if (direct !== value) return direct;
+  try {
+    const obj = JSON.parse(value) as unknown;
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        next[k] = typeof v === 'string' ? retitleLinksInValue(v, titleById) : v;
+        if (next[k] !== v) changed = true;
+      }
+      return changed ? JSON.stringify(next) : value;
+    }
+  } catch {
+    // Not structured (plain text) — already checked directly above.
+  }
+  return value;
+}
+
+/**
  * Rewrites link-token title snapshots across the whole board so every
  * cross-reference reflects the linked item's current title.
  */
@@ -221,7 +248,7 @@ export function syncLinkTitles(tabs: BoardTab[]): BoardTab[] {
     items: (tab.items || []).map((item) => {
       const fields = (item.fields || []).map((f) =>
         f.textValue !== undefined
-          ? { ...f, textValue: retitleLinksInValue(f.textValue, titleById) }
+          ? { ...f, textValue: retitleLinksInFieldValue(f.textValue, titleById) }
           : f
       );
       return { ...item, fields };
