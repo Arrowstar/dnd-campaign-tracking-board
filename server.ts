@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { promisify } from 'util';
 import { scrubTabsForUser, mergeTabsForSave, Viewer } from './lib/fieldVisibility';
+import { syncLinkTitles } from './lib/crossref';
 
 // promisify crypto.scrypt — the overload that returns Buffer
 const scryptAsync = promisify<string | Buffer, string | Buffer, number, Buffer>(
@@ -172,6 +173,8 @@ nextApp.prepare().then(async () => {
           id: currentUser.id,
           role: currentUser.role,
         });
+        // Keep link-token title snapshots in sync with item titles.
+        board.tabs = syncLinkTitles(board.tabs);
         saveData();
         // Broadcast a per-recipient scrubbed copy of the board state.
         io.in(currentUser.boardId).fetchSockets().then((sockets) => {
@@ -477,6 +480,8 @@ nextApp.prepare().then(async () => {
       if (tabs) {
         // Merge so clients can never overwrite/delete content they can't see.
         board.tabs = mergeTabsForSave(board.tabs || [], tabs, { id: user.id, role: member.role });
+        // Keep link-token title snapshots in sync with item titles.
+        board.tabs = syncLinkTitles(board.tabs);
       }
       await saveData();
 

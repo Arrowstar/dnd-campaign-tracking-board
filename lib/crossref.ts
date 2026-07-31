@@ -15,7 +15,7 @@
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
-import { ItemType } from './types';
+import { BoardTab, ItemType } from './types';
 
 export const MULTILINK_PREFIX = '@@MULTILINK:';
 export const LEGACY_LINK_PREFIX = '@@LINK:';
@@ -182,4 +182,49 @@ export function setTextInValue(existing: string, text: string): string {
     ? [{ type: 'text', value: text }, ...links]
     : [...links];
   return encodeTokens(newTokens);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Title sync
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Update the stored title snapshot of every link token whose id appears in
+ * `titleById` so the link reflects the referenced item's current title.
+ * Returns the value unchanged when it holds no links or nothing changed.
+ */
+export function retitleLinksInValue(value: string, titleById: Map<string, string>): string {
+  if (!value || (!isMultiLinkValue(value) && !isLegacyLinkValue(value))) return value;
+  const tokens = parseTokens(value);
+  let changed = false;
+  const updated = tokens.map((t) => {
+    if (t.type !== 'link') return t;
+    const current = titleById.get(t.id);
+    if (current === undefined || current === t.title) return t;
+    changed = true;
+    return { ...t, title: current };
+  });
+  return changed ? encodeTokens(updated) : value;
+}
+
+/**
+ * Rewrites link-token title snapshots across the whole board so every
+ * cross-reference reflects the linked item's current title.
+ */
+export function syncLinkTitles(tabs: BoardTab[]): BoardTab[] {
+  const titleById = new Map<string, string>();
+  for (const tab of tabs) {
+    for (const item of tab.items || []) titleById.set(item.id, item.title);
+  }
+  return tabs.map((tab) => ({
+    ...tab,
+    items: (tab.items || []).map((item) => {
+      const fields = (item.fields || []).map((f) =>
+        f.textValue !== undefined
+          ? { ...f, textValue: retitleLinksInValue(f.textValue, titleById) }
+          : f
+      );
+      return { ...item, fields };
+    }),
+  }));
 }

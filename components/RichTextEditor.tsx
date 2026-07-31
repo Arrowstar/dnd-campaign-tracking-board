@@ -1,21 +1,47 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { 
-  Bold, 
-  Italic, 
-  Underline, 
-  Strikethrough, 
-  AlignLeft, 
-  AlignCenter, 
-  AlignRight, 
-  AlignJustify, 
-  List, 
-  ListOrdered, 
-  Palette, 
-  Type, 
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { TextStyleKit } from '@tiptap/extension-text-style';
+import TextAlign from '@tiptap/extension-text-align';
+import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
+import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
+import Highlight from '@tiptap/extension-highlight';
+import {
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  List,
+  ListOrdered,
+  Palette,
+  Type,
   RemoveFormatting,
-  ChevronDown
+  ChevronDown,
+  Heading1,
+  Heading2,
+  Heading3,
+  Heading,
+  Quote,
+  Code,
+  Minus,
+  Link as LinkIcon,
+  Image as ImageIcon,
+  Table as TableIcon,
+  Undo2,
+  Redo2,
+  Highlighter,
+  Columns3,
+  Rows3,
+  Trash2,
+  Plus,
+  X,
 } from 'lucide-react';
 
 interface RichTextEditorProps {
@@ -51,6 +77,49 @@ const TEXT_COLORS = [
   { label: 'Pure White', hex: '#FFFFFF' },
 ];
 
+const HEADINGS = [
+  { label: 'Normal text', level: 0 },
+  { label: 'Heading 1', level: 1 },
+  { label: 'Heading 2', level: 2 },
+  { label: 'Heading 3', level: 3 },
+];
+
+function stopPropagation(e: React.SyntheticEvent) {
+  e.stopPropagation();
+  if ('nativeEvent' in e && e.nativeEvent) {
+    e.nativeEvent.stopImmediatePropagation?.();
+  }
+}
+
+function preventDefaultBtn(e: React.MouseEvent) {
+  e.preventDefault();
+  stopPropagation(e);
+}
+
+const toolBtn = (active: boolean) =>
+  `p-1 hover:bg-black/10 rounded transition-colors ${active ? 'bg-[#EBE4D8] text-[#B58D3D]' : ''}`;
+
+function ToolbarButton({ onClick, active = false, title, icon }: {
+  onClick: () => void;
+  active?: boolean;
+  title: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={preventDefaultBtn}
+      onClick={onClick}
+      className={toolBtn(active)}
+      title={title}
+    >
+      {icon}
+    </button>
+  );
+}
+
+const divider = <div className="w-[1px] h-3.5 bg-black/15 mx-0.5" />;
+
 export function RichTextEditor({
   value,
   onChange,
@@ -60,100 +129,144 @@ export function RichTextEditor({
   compact = false,
   disabled = false,
 }: RichTextEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showFontSizePicker, setShowFontSizePicker] = useState(false);
-  const [selectedColor, setSelectedColor] = useState('#1F2937');
-  const [selectedFontSize, setSelectedFontSize] = useState('14px');
+  const [showHeadingPicker, setShowHeadingPicker] = useState(false);
+  const [showTableMenu, setShowTableMenu] = useState(false);
+  const [, setTick] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const skipNextUpdate = useRef(false);
 
-  // Sync value from props to editor HTML when not actively typing
+  const editor = useEditor({
+    immediatelyRender: false,
+    editable: !disabled,
+    content: value || '',
+    extensions: [
+      StarterKit,
+      TextStyleKit.configure({
+        color: { types: ['textStyle'] },
+        fontSize: { types: ['textStyle'] },
+      }),
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      Placeholder.configure({ placeholder }),
+      Image.configure({ inline: false, allowBase64: false }),
+      Highlight.configure({ multicolor: false }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    editorProps: {
+      attributes: {
+        class: `tiptap rich-text-content flex-1 p-2 outline-none overflow-y-auto cursor-text text-xs leading-relaxed transition-all ${
+          compact ? 'min-h-[60px] max-h-[140px]' : 'min-h-[100px]'
+        }`,
+        style: `color: ${isLight ? '#1F2937' : '#2C2824'}`,
+        'data-interactive': 'true',
+      },
+    },
+    onUpdate: ({ editor }) => {
+      if (skipNextUpdate.current) {
+        skipNextUpdate.current = false;
+        return;
+      }
+      onChange(editor.isEmpty ? '' : editor.getHTML());
+    },
+    onSelectionUpdate: () => setTick(t => t + 1),
+    onTransaction: () => setTick(t => t + 1),
+  });
+
+  // Keep editor in sync with external value changes (undo in drawer, etc.)
   useEffect(() => {
-    if (editorRef.current) {
-      const currentHTML = editorRef.current.innerHTML;
-      if (value !== currentHTML) {
-        // If the editor is not focused, update innerHTML
-        if (document.activeElement !== editorRef.current) {
-          editorRef.current.innerHTML = value || '';
-        }
+    if (!editor) return;
+    const current = editor.getHTML();
+    const next = value || '';
+    if (current !== next) {
+      const dom = editor.view.dom;
+      const hasFocus = document.activeElement === dom || dom.contains(document.activeElement);
+      if (!hasFocus) {
+        skipNextUpdate.current = true;
+        editor.commands.setContent(next, { emitUpdate: false });
       }
     }
-  }, [value]);
+  }, [value, editor]);
 
-  const handleInput = useCallback(() => {
-    if (editorRef.current) {
-      const html = editorRef.current.innerHTML;
-      // If it's just <br> or empty tag, treat as empty string
-      if (html === '<br>' || html === '<div><br></div>' || html.trim() === '') {
-        onChange('');
-      } else {
-        onChange(html);
-      }
+  useEffect(() => {
+    if (editor) editor.setEditable(!disabled);
+  }, [disabled, editor]);
+
+  useEffect(() => {
+    if (editor) {
+      editor.view.dom.style.color = isLight ? '#1F2937' : '#2C2824';
     }
-  }, [onChange]);
+  }, [isLight, editor]);
 
-  const execCommand = (command: string, arg: string | undefined = undefined) => {
-    if (disabled) return;
-    document.execCommand(command, false, arg);
-    handleInput();
-  };
+  type Chain = ReturnType<NonNullable<typeof editor>['chain']>;
+
+  const run = useCallback((fn: (chain: Chain) => Chain) => {
+    if (!editor || disabled) return;
+    fn(editor.chain().focus()).run();
+  }, [editor, disabled]);
+
+  const isActive = useCallback((nameOrAttrs: string | Record<string, unknown>, attrs?: Record<string, unknown>) => {
+    if (typeof nameOrAttrs === 'string') {
+      return editor?.isActive(nameOrAttrs, attrs) ?? false;
+    }
+    return editor?.isActive(nameOrAttrs) ?? false;
+  }, [editor]);
 
   const applyFontSize = (sizePx: string) => {
-    if (disabled) return;
-    setSelectedFontSize(sizePx);
     setShowFontSizePicker(false);
-
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-
-    const range = selection.getRangeAt(0);
-    if (range.collapsed) {
-      // If nothing selected, execute fontSize command then update span
-      document.execCommand('fontSize', false, '7');
-    } else {
-      // Wrap selection in a span with style font-size
-      try {
-        const span = document.createElement('span');
-        span.style.fontSize = sizePx;
-        range.surroundContents(span);
-      } catch (e) {
-        // Fallback for selection crossing nodes
-        document.execCommand('fontSize', false, '7');
-        if (editorRef.current) {
-          const fontEls = editorRef.current.querySelectorAll('font[size="7"]');
-          fontEls.forEach(el => {
-            const span = document.createElement('span');
-            span.style.fontSize = sizePx;
-            span.innerHTML = el.innerHTML;
-            el.parentNode?.replaceChild(span, el);
-          });
-        }
-      }
-    }
-    handleInput();
+    run(c => c.setFontSize(sizePx));
   };
 
   const applyTextColor = (colorHex: string) => {
-    if (disabled) return;
-    setSelectedColor(colorHex);
     setShowColorPicker(false);
-    document.execCommand('foreColor', false, colorHex);
-    handleInput();
+    run(c => c.setColor(colorHex));
   };
 
-  const stopPropagation = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    if ('nativeEvent' in e && e.nativeEvent) {
-      e.nativeEvent.stopImmediatePropagation?.();
+  const applyHeading = (level: number) => {
+    setShowHeadingPicker(false);
+    if (!editor || disabled) return;
+    if (level === 0) editor.chain().focus().setParagraph().run();
+    else editor.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 }).run();
+  };
+
+  const setLink = () => {
+    if (!editor) return;
+    const prev = editor.getAttributes('link').href as string | undefined;
+    const url = window.prompt('Link URL', prev || 'https://');
+    if (url === null) return;
+    if (url === '') {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      return;
     }
+    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
   };
 
-  const preventDefaultBtn = (e: React.MouseEvent) => {
-    e.preventDefault();
-    stopPropagation(e);
+  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !editor) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    fetch('/api/upload', { method: 'POST', body: formData })
+      .then(r => r.json())
+      .then(data => {
+        if (data.url) {
+          editor.chain().focus().setImage({ src: data.url }).run();
+        } else if (data.error) {
+          window.alert(`Upload failed: ${data.error}`);
+        }
+      })
+      .catch(err => window.alert(`Upload failed: ${err.message}`));
   };
+
+  const selectedFontSize = FONT_SIZES.find(s => isActive('textStyle', { fontSize: s.value }))?.value ?? '14px';
+  const selectedHeading = HEADINGS.find(h => h.level !== 0 && isActive('heading', { level: h.level }));
 
   return (
-    <div 
+    <div
       className={`flex flex-col border rounded-md overflow-visible transition-colors ${
         isLight ? 'border-[#D9D0C1] bg-white/70' : 'border-black/20 bg-black/10'
       } ${className}`}
@@ -169,7 +282,7 @@ export function RichTextEditor({
       onTouchEnd={stopPropagation}
     >
       {/* Rich Text Toolbar */}
-      <div 
+      <div
         className={`flex flex-wrap items-center gap-0.5 p-1 border-b select-none ${
           isLight ? 'bg-[#F5F2ED] border-[#D9D0C1] text-[#423D38]' : 'bg-black/10 border-black/10 text-gray-800'
         }`}
@@ -183,6 +296,8 @@ export function RichTextEditor({
             onClick={() => {
               setShowFontSizePicker(!showFontSizePicker);
               setShowColorPicker(false);
+              setShowHeadingPicker(false);
+              setShowTableMenu(false);
             }}
             className="flex items-center gap-1 px-1.5 py-1 text-[11px] font-bold rounded hover:bg-black/10 transition-colors"
             title="Font Size"
@@ -193,7 +308,7 @@ export function RichTextEditor({
           </button>
 
           {showFontSizePicker && (
-            <div 
+            <div
               className="absolute top-full left-0 mt-1 w-36 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
               onMouseDown={preventDefaultBtn}
             >
@@ -222,19 +337,21 @@ export function RichTextEditor({
             onClick={() => {
               setShowColorPicker(!showColorPicker);
               setShowFontSizePicker(false);
+              setShowHeadingPicker(false);
+              setShowTableMenu(false);
             }}
             className="p-1 hover:bg-black/10 rounded flex items-center gap-1 transition-colors"
             title="Font Color"
           >
             <Palette size={compact ? 12 : 13} />
-            <div 
-              className="w-3 h-3 rounded-full border border-black/30 shadow-xs" 
-              style={{ backgroundColor: selectedColor }}
+            <div
+              className="w-3 h-3 rounded-full border border-black/30 shadow-xs"
+              style={{ backgroundColor: (editor?.getAttributes('textStyle').color as string) || '#1F2937' }}
             />
           </button>
 
           {showColorPicker && (
-            <div 
+            <div
               className="absolute top-full left-0 mt-1 w-48 bg-white border border-[#D9D0C1] rounded shadow-xl p-2 z-50 font-sans"
               onMouseDown={preventDefaultBtn}
             >
@@ -256,9 +373,9 @@ export function RichTextEditor({
               </div>
               <div className="flex items-center justify-between pt-1 border-t border-[#F5F2ED] text-[10px] font-bold text-[#8C7B6E]">
                 <span>Custom Color</span>
-                <input 
-                  type="color" 
-                  value={selectedColor}
+                <input
+                  type="color"
+                  value={(editor?.getAttributes('textStyle').color as string) || '#1F2937'}
                   onChange={e => applyTextColor(e.target.value)}
                   className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
                   onMouseDown={preventDefaultBtn}
@@ -268,113 +385,187 @@ export function RichTextEditor({
           )}
         </div>
 
-        <div className="w-[1px] h-3.5 bg-black/15 mx-0.5" />
+        {divider}
 
         {/* Bold, Italic, Underline, Strikethrough */}
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('bold')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Bold (Ctrl+B)"
-        >
-          <Bold size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('italic')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Italic (Ctrl+I)"
-        >
-          <Italic size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('underline')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Underline (Ctrl+U)"
-        >
-          <Underline size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('strikeThrough')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Strikethrough"
-        >
-          <Strikethrough size={compact ? 12 : 13} />
-        </button>
+        <ToolbarButton onClick={() => run(c => c.toggleBold())} active={isActive('bold')} title="Bold (Ctrl+B)" icon={<Bold size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleItalic())} active={isActive('italic')} title="Italic (Ctrl+I)" icon={<Italic size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleUnderline())} active={isActive('underline')} title="Underline (Ctrl+U)" icon={<Underline size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleStrike())} active={isActive('strike')} title="Strikethrough" icon={<Strikethrough size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleHighlight())} active={isActive('highlight')} title="Highlight" icon={<Highlighter size={compact ? 12 : 13} />} />
 
-        <div className="w-[1px] h-3.5 bg-black/15 mx-0.5" />
+        {divider}
 
-        {/* Alignments */}
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('justifyLeft')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Align Left"
-        >
-          <AlignLeft size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('justifyCenter')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Align Center"
-        >
-          <AlignCenter size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('justifyRight')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Align Right"
-        >
-          <AlignRight size={compact ? 12 : 13} />
-        </button>
-        {!compact && (
+        {/* Heading Dropdown */}
+        <div className="relative">
           <button
             type="button"
             onMouseDown={preventDefaultBtn}
-            onClick={() => execCommand('justifyFull')}
-            className="p-1 hover:bg-black/10 rounded transition-colors"
-            title="Justify Text"
+            onClick={() => {
+              setShowHeadingPicker(!showHeadingPicker);
+              setShowFontSizePicker(false);
+              setShowColorPicker(false);
+              setShowTableMenu(false);
+            }}
+            className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-black/10 transition-colors"
+            title="Heading"
           >
-            <AlignJustify size={13} />
+            {selectedHeading?.level === 1 ? <Heading1 size={compact ? 12 : 13} /> :
+             selectedHeading?.level === 2 ? <Heading2 size={compact ? 12 : 13} /> :
+             selectedHeading?.level === 3 ? <Heading3 size={compact ? 12 : 13} /> :
+             <Heading size={compact ? 12 : 13} />}
+            <ChevronDown size={10} />
           </button>
+
+          {showHeadingPicker && (
+            <div
+              className="absolute top-full left-0 mt-1 w-40 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
+              onMouseDown={preventDefaultBtn}
+            >
+              {HEADINGS.map(h => (
+                <button
+                  key={h.label}
+                  type="button"
+                  onMouseDown={preventDefaultBtn}
+                  onClick={() => applyHeading(h.level)}
+                  className={`w-full text-left px-2.5 py-1 hover:bg-[#F5F2ED] ${
+                    (h.level === 0 ? !editor?.isActive('heading') : isActive('heading', { level: h.level }))
+                      ? 'font-bold bg-[#EBE4D8] text-[#B58D3D]'
+                      : 'text-[#2C2824]'
+                  }`}
+                >
+                  <span className="text-xs">{h.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {divider}
+
+        {/* Alignments */}
+        <ToolbarButton onClick={() => run(c => c.setTextAlign('left'))} active={isActive({ textAlign: 'left' })} title="Align Left" icon={<AlignLeft size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.setTextAlign('center'))} active={isActive({ textAlign: 'center' })} title="Align Center" icon={<AlignCenter size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.setTextAlign('right'))} active={isActive({ textAlign: 'right' })} title="Align Right" icon={<AlignRight size={compact ? 12 : 13} />} />
+        {!compact && (
+          <ToolbarButton onClick={() => run(c => c.setTextAlign('justify'))} active={isActive({ textAlign: 'justify' })} title="Justify Text" icon={<AlignJustify size={13} />} />
         )}
 
-        <div className="w-[1px] h-3.5 bg-black/15 mx-0.5" />
+        {divider}
 
-        {/* Lists & Format Clear */}
+        {/* Lists */}
+        <ToolbarButton onClick={() => run(c => c.toggleBulletList())} active={isActive('bulletList')} title="Bullet List" icon={<List size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleOrderedList())} active={isActive('orderedList')} title="Numbered List" icon={<ListOrdered size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.toggleBlockquote())} active={isActive('blockquote')} title="Blockquote" icon={<Quote size={compact ? 12 : 13} />} />
+        {!compact && (
+          <ToolbarButton onClick={() => run(c => c.toggleCodeBlock())} active={isActive('codeBlock')} title="Code Block" icon={<Code size={13} />} />
+        )}
+        {!compact && (
+          <ToolbarButton onClick={() => run(c => c.setHorizontalRule())} title="Horizontal Rule" icon={<Minus size={13} />} />
+        )}
+
+        {!compact && divider}
+
+        {/* Link & Image */}
+        <ToolbarButton onClick={setLink} active={isActive('link')} title="Link (Ctrl+K)" icon={<LinkIcon size={13} />} />
+        {!compact && (
+          <ToolbarButton onClick={() => fileInputRef.current?.click()} title="Insert Image" icon={<ImageIcon size={13} />} />
+        )}
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+
+        {/* Table Menu */}
+        {!compact && (
+          <div className="relative">
+            <ToolbarButton
+              onClick={() => {
+                setShowTableMenu(!showTableMenu);
+                setShowFontSizePicker(false);
+                setShowColorPicker(false);
+                setShowHeadingPicker(false);
+              }}
+              active={isActive('table')}
+              title="Table"
+              icon={<TableIcon size={13} />}
+            />
+            {showTableMenu && (
+              <div
+                className="absolute top-full left-0 mt-1 w-40 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
+                onMouseDown={preventDefaultBtn}
+              >
+                {!isActive('table') && (
+                  <button
+                    type="button"
+                    onMouseDown={preventDefaultBtn}
+                    onClick={() => {
+                      setShowTableMenu(false);
+                      run(c => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }));
+                    }}
+                    className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                  >
+                    <Plus size={12} /> Insert Table (3x3)
+                  </button>
+                )}
+                {isActive('table') && (
+                  <>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.addRowAfter()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <Rows3 size={12} /> Add Row
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.deleteRow()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <X size={12} /> Delete Row
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.addColumnAfter()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <Columns3 size={12} /> Add Column
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.deleteColumn()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <X size={12} /> Delete Column
+                    </button>
+                    <div className="border-t border-[#F5F2ED] my-1" />
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.deleteTable()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-red-700/80 flex items-center gap-2"
+                    >
+                      <Trash2 size={12} /> Delete Table
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {divider}
+
+        {/* Undo / Redo */}
+        <ToolbarButton onClick={() => run(c => c.undo())} title="Undo (Ctrl+Z)" icon={<Undo2 size={compact ? 12 : 13} />} />
+        <ToolbarButton onClick={() => run(c => c.redo())} title="Redo (Ctrl+Y)" icon={<Redo2 size={compact ? 12 : 13} />} />
+
+        {/* Clear Formatting */}
         <button
           type="button"
           onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('insertUnorderedList')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Bullet List"
-        >
-          <List size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('insertOrderedList')}
-          className="p-1 hover:bg-black/10 rounded transition-colors"
-          title="Numbered List"
-        >
-          <ListOrdered size={compact ? 12 : 13} />
-        </button>
-        <button
-          type="button"
-          onMouseDown={preventDefaultBtn}
-          onClick={() => execCommand('removeFormat')}
+          onClick={() => run(c => c.unsetAllMarks().clearNodes())}
           className="p-1 hover:bg-black/10 rounded text-red-700/80 hover:text-red-800 transition-colors ml-auto"
           title="Clear Formatting"
         >
@@ -383,31 +574,7 @@ export function RichTextEditor({
       </div>
 
       {/* Content Editable Area */}
-      <div
-        ref={editorRef}
-        contentEditable={!disabled}
-        onInput={handleInput}
-        onBlur={handleInput}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-        }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          e.nativeEvent.stopImmediatePropagation?.();
-        }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          e.nativeEvent.stopImmediatePropagation?.();
-        }}
-        data-interactive="true"
-        data-placeholder={placeholder}
-        className={`rich-text-content flex-1 p-2 outline-none overflow-y-auto cursor-text text-xs leading-relaxed transition-all ${
-          compact ? 'min-h-[60px] max-h-[140px]' : 'min-h-[100px]'
-        }`}
-        style={{
-          color: isLight ? '#1F2937' : '#2C2824',
-        }}
-      />
+      <EditorContent editor={editor} />
     </div>
   );
 }
@@ -420,7 +587,7 @@ export function RichTextDisplay({ content, className = '' }: { content: string; 
   const formattedHtml = hasHtml ? content : content.replace(/\n/g, '<br />');
 
   return (
-    <div 
+    <div
       className={`rich-text-content break-words ${className}`}
       dangerouslySetInnerHTML={{ __html: formattedHtml }}
     />
