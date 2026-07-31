@@ -311,8 +311,8 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
         <div className="flex flex-col gap-0.5">
           {entries.map(([k, v]) => (
             <div key={k} className="flex items-baseline gap-1 text-[10px] leading-tight">
-              <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 min-w-0 truncate max-w-[64px]">{k}</span>
-              <span className="truncate opacity-90">{getPlainText(v)}</span>
+              <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={k}>{k}</span>
+              <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(v)}</span>
             </div>
           ))}
         </div>
@@ -360,8 +360,8 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
       <div className="flex flex-col gap-0.5">
         {entries.map(e => (
           <div key={e.label} className="flex items-baseline gap-1 text-[10px] leading-tight">
-            <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 min-w-0 truncate max-w-[60px]">{e.label}</span>
-            <span className="truncate opacity-90">{getPlainText(e.value)}</span>
+            <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={e.label}>{e.label}</span>
+            <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(e.value)}</span>
           </div>
         ))}
       </div>
