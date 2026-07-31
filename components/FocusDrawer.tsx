@@ -759,7 +759,7 @@ function CardPreviewMini({ layout, item, fieldDefs }: {
         <span className="text-[8px] font-bold font-serif italic text-white truncate flex-1 min-w-0">{item.title || 'Untitled'}</span>
         <span className="text-[6px] font-bold uppercase tracking-wider text-white/90 bg-white/20 rounded px-1 py-px flex-shrink-0">{item.type}</span>
       </div>
-      <div className="grid gap-1 p-1.5" style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }}>
+      <div className="grid content-start gap-1 p-1.5" style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }}>
         {layout.rows.length === 0 ? (
           <div className="text-[8px] italic text-[#8C7B6E] text-center py-2 col-span-full">
             No preview fields — check some below
@@ -798,7 +798,7 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
     const isThumb = mode === 'thumb';
     return (
       <div style={spanStyle} className="min-h-0">
-        <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-5 w-5' : 'h-9'}`}>
+        <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-5' : 'h-9'}`}>
           <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
         </div>
       </div>

@@ -321,8 +321,9 @@ interface BoardItemProps {
 // Preview renderer — renders one PreviewFieldSlot visually in the compact card
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Hero (full-width) image previews render at 140px tall; thumbnails are 72px
-// squares. (Hardcoded in the class names below — Tailwind needs static classes.)
+// Hero (full-width) image previews render at 140px tall; thumbnail previews
+// are 72px-tall strips that fill the column width. (Hardcoded in the class
+// names below — Tailwind needs static classes.)
 
 function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: {
   slot: PreviewFieldSlot;
@@ -375,7 +376,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
             src={imageUrl}
             alt="NPC portrait"
             draggable={false}
-            className="w-[72px] h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            className="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
           />
         </div>
       );
@@ -403,7 +404,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
             src={imageUrl}
             alt={fieldLabel}
             draggable={false}
-            className="w-[72px] h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            className="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
           />
         </div>
       );
@@ -481,7 +482,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   if (!plain) return null;
   const clamp = resolveClampLines(slot, mode);
   return (
-    <div style={spanStyle} className="flex flex-col gap-0.5 min-h-0">
+    <div style={spanStyle} className="flex flex-col gap-0.5 justify-between min-h-0">
       <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={fieldLabel}>
         {fieldLabel}
       </span>
@@ -1178,7 +1179,7 @@ export default memo(function BoardItem({
       {/* ── Preview Body — hidden when minimized ── */}
       {!item.minimized && (
         <div
-          className="grid gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
+          className="grid content-start gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
           style={{ gridTemplateColumns: previewLayout.columns === 2 ? 'repeat(2, minmax(0, 1fr))' : 'repeat(1, minmax(0, 1fr))' }}
           onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
           title="Click to open in focus panel"
