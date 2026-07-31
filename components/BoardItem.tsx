@@ -219,9 +219,24 @@ function isLightColor(hexColor: string): boolean {
   return (r * 299 + g * 587 + b * 114) / 1000 > 165;
 }
 
-/** Strip HTML tags for plain text preview */
+/** Decode common HTML entities (the rich text editor's contentEditable HTML
+ *  uses these — &nbsp; especially, for repeated spaces — so plain-text
+ *  previews need to decode them or they show up as literal "&nbsp;" text). */
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&nbsp;/gi, '\u00A0')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/** Strip HTML tags (and decode entities) for plain text preview */
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, '').trim();
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, '')).trim();
 }
 
 // Minimum card width. The header row packs a visibility icon, the title,
@@ -323,7 +338,14 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
     if (npcField?.textValue) {
       const plain = stripHtml(getPlainText(npcField.textValue));
       if (!plain) return null;
-      return <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">{plain}</p>;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={npcField.label}>
+            {npcField.label}
+          </span>
+          <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">{plain}</p>
+        </div>
+      );
     }
     return null;
   }
@@ -368,7 +390,7 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
     );
   }
 
-  // ── Text field — show first 2 lines of plain text ──
+  // ── Text field — show a label plus first 2 lines of plain text ──
   if (def.type === 'text') {
     // Always read the live value from resolvedFields — it already merges
     // saved item.fields over the item.content-seeded default, so this
@@ -379,9 +401,14 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
     const plain = rawValue ? stripHtml(getPlainText(rawValue || '')) : '';
     if (!plain) return null;
     return (
-      <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">
-        {plain}
-      </p>
+      <div className="flex flex-col gap-0.5">
+        <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={def.label}>
+          {def.label}
+        </span>
+        <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">
+          {plain}
+        </p>
+      </div>
     );
   }
 
