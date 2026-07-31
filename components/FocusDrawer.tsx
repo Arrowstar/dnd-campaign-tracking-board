@@ -777,7 +777,7 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ from: number; target: number; active: boolean } | null>(null);
 
-  // Drag reorder: pointer drag on a block, drop before the target row.
+  // Drag reorder: pointer drag on a block; dropping on another block swaps their rows.
   const handleRowPointerDown = (e: React.PointerEvent, from: number) => {
     if (!canEdit) return;
     e.stopPropagation();
@@ -797,35 +797,31 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
       const els = Array.from(container.querySelectorAll<HTMLElement>('[data-mini-preview-row]'));
       if (els.length === 0) return;
 
-      // Group DOM-ordered blocks into visual rows (blocks whose vertical ranges overlap).
-      const rows: number[][] = [[0]];
-      for (let i = 1; i < els.length; i++) {
-        const prev = els[i - 1].getBoundingClientRect();
-        const cur = els[i].getBoundingClientRect();
-        if (cur.top < prev.bottom - 1 && cur.bottom > prev.top + 1) {
-          rows[rows.length - 1].push(i);
-        } else {
-          rows.push([i]);
+      const rects = els.map(el => el.getBoundingClientRect());
+
+      // Hit-test: the block under the pointer (drop = swap with it).
+      let t = -1;
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (mv.clientX >= r.left - 2 && mv.clientX <= r.right + 2 &&
+            mv.clientY >= r.top - 2 && mv.clientY <= r.bottom + 2) {
+          t = i;
+          break;
         }
       }
 
-      // Find the target: above a row → before its first block; inside a row → by X position.
-      let t = els.length;
-      for (const row of rows) {
-        const rects = row.map(i => els[i].getBoundingClientRect());
-        const top = Math.min(...rects.map(r => r.top));
-        const bottom = Math.max(...rects.map(r => r.bottom));
-        if (mv.clientY < top - 2) { t = row[0]; break; }
-        if (mv.clientY > bottom + 2) continue;
-        let placed = false;
-        for (let k = 0; k < row.length; k++) {
-          const r = rects[k];
-          if (mv.clientX < r.left - 2) { t = row[k]; placed = true; break; }
-          if (mv.clientX <= r.right + 2) { t = mv.clientX < r.left + r.width / 2 ? row[k] : row[k] + 1; placed = true; break; }
+      // Fallback: pointer in a gap → nearest block by midpoint distance.
+      if (t < 0) {
+        let best = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < rects.length; i++) {
+          const r = rects[i];
+          const d = Math.hypot(mv.clientX - (r.left + r.width / 2), mv.clientY - (r.top + r.height / 2));
+          if (d < bestDist) { bestDist = d; best = i; }
         }
-        if (!placed) t = row[row.length - 1] + 1;
-        break;
+        t = best;
       }
+
       if (t !== target) {
         target = t;
         setDrag({ from, target, active });
@@ -839,8 +835,7 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
       setDrag(null);
       if (!active || target === from) return;
       const rows = [...layout.rows];
-      const [moved] = rows.splice(from, 1);
-      rows.splice(target > from ? target - 1 : target, 0, moved);
+      [rows[from], rows[target]] = [rows[target], rows[from]];
       onUpdate({ ...item, previewLayout: { ...layout, rows } });
     };
 
@@ -868,7 +863,6 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
             fieldDefs={fieldDefs}
             columns={layout.columns}
             index={i}
-            rowCount={layout.rows.length}
             canEdit={canEdit}
             drag={drag}
             onPointerDown={canEdit ? (e) => handleRowPointerDown(e, i) : undefined}
@@ -891,13 +885,12 @@ function previewFieldLabel(item: BoardItemType, slot: PreviewFieldSlot, fieldDef
   return slot.fieldId;
 }
 
-function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEdit, drag, onPointerDown }: {
+function MiniFieldBlock({ slot, item, fieldDefs, columns, index, canEdit, drag, onPointerDown }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   fieldDefs: FieldDef[] | null;
   columns: PreviewLayout['columns'];
   index: number;
-  rowCount: number;
   canEdit: boolean;
   drag: { from: number; target: number; active: boolean } | null;
   onPointerDown?: (e: React.PointerEvent) => void;
@@ -911,12 +904,11 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEd
 
   const isDragging = drag?.active && drag.from === index;
   const isDropTarget = drag?.active && drag.target === index;
-  const isDropEnd = drag?.active && drag.target === rowCount && index === rowCount - 1;
   const rootClass = [
     'min-h-0',
     canEdit ? 'cursor-grab touch-none' : '',
     isDragging ? 'opacity-40 cursor-grabbing' : '',
-    isDropTarget || isDropEnd ? 'ring-1 ring-inset ring-[#B58D3D] bg-[#B58D3D]/10 rounded' : '',
+    isDropTarget ? 'ring-1 ring-inset ring-[#B58D3D] bg-[#B58D3D]/10 rounded' : '',
   ].filter(Boolean).join(' ');
   const rootProps = {
     'data-mini-preview-row': true,
