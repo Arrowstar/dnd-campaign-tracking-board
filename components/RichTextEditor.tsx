@@ -599,6 +599,21 @@ export function RichTextDisplay({ content, className = '' }: { content: string; 
 }
 
 /**
+ * Extract text alignment from a block tag's attribute string — supports both
+ * the modern style="text-align: X" (TipTap) and legacy align="X" (old
+ * execCommand editor) forms.
+ */
+function getTextAlignFromAttrs(attrs: string): string | null {
+  const styleMatch = attrs.match(/style\s*=\s*["']([^"']*)["']/i);
+  if (styleMatch) {
+    const am = styleMatch[1].match(/text-align\s*:\s*(left|center|right|justify)/i);
+    if (am) return am[1].toLowerCase();
+  }
+  const attrMatch = attrs.match(/\balign\s*=\s*["'](left|center|right|justify)["']/i);
+  return attrMatch ? attrMatch[1].toLowerCase() : null;
+}
+
+/**
  * Flatten editor HTML into a compact inline-HTML string suitable for
  * line-clamped card previews. Inline formatting (bold, italic, underline,
  * colors, font sizes, highlights, links) is preserved, block boundaries
@@ -615,18 +630,36 @@ export function flattenRichTextForPreview(html: string): string {
   s = s.replace(/<img[^>]*>/gi, '');
   // Normalize <br> variants.
   s = s.replace(/<br\s*\/?>/gi, '\u0000'); // sentinel: survives trimming, replaced below
-  // Block boundaries → line breaks (inline content inside is kept).
-  s = s.replace(/<(h[1-6])[^>]*>/gi, '<strong>');
-  s = s.replace(/<\/(h[1-6])>/gi, '</strong>\u0000');
-  s = s.replace(/<blockquote[^>]*>/gi, '<span class="rt-preview-quote">');
-  s = s.replace(/<\/blockquote>/gi, '</span>\u0000');
-  s = s.replace(/<pre[^>]*>/gi, '<span class="rt-preview-pre">');
-  s = s.replace(/<\/pre>/gi, '</span>\u0000');
-  s = s.replace(/<hr[^>]*\/?>/gi, '\u0000');
-  s = s.replace(/<div[^>]*>/gi, '\u0000').replace(/<\/div>/gi, '');
-  s = s.replace(/<p[^>]*>/gi, '').replace(/<\/p>/gi, '\u0000');
-  s = s.replace(/<(address|section|article|aside|header|footer|figure|figcaption|details|summary|fieldset|form)[^>]*>/gi, '\u0000');
-  s = s.replace(/<\/(address|section|article|aside|header|footer|figure|figcaption|details|summary|fieldset|form)>/gi, '');
+  // Block boundaries → line breaks (inline content inside is kept), with
+  // text alignment preserved via wrapper spans. Single pass so the block
+  // open/close stack stays consistent.
+  const alignable = (t: string) => t === 'p' || t === 'div' || /^h[1-6]$/.test(t);
+  const isHeading = (t: string) => /^h[1-6]$/.test(t);
+  const blockStack: { kind: string; align: string | null }[] = [];
+  s = s.replace(/<(\/)?(blockquote|pre|hr|h[1-6]|p|div|address|section|article|aside|header|footer|figure|figcaption|details|summary|fieldset|form)([^>]*)>/gi, (match, close, tag, attrs) => {
+    const t = tag.toLowerCase();
+    if (close) {
+      if (t === 'hr') return '';
+      const entry = blockStack.pop();
+      if (!entry) return '\u0000';
+      let out = '';
+      if (entry.align) out += '</span>';
+      if (entry.kind === 'quote') out += '</span>';
+      else if (entry.kind === 'pre') out += '</span>';
+      else if (entry.kind === 'heading') out += '</strong>';
+      return out + '\u0000';
+    }
+    if (t === 'hr') return '\u0000';
+    let out = '';
+    let kind = 'other';
+    if (t === 'blockquote') { out += '<span class="rt-preview-quote">'; kind = 'quote'; }
+    else if (t === 'pre') { out += '<span class="rt-preview-pre">'; kind = 'pre'; }
+    else if (isHeading(t)) { out += '<strong>'; kind = 'heading'; }
+    const align = alignable(t) ? getTextAlignFromAttrs(attrs) : null;
+    if (align) out += `<span style="display:block;text-align:${align}">`;
+    blockStack.push({ kind, align });
+    return out;
+  });
 
   // Lists: numbered items get 1./2./…, bullets get •; each item ends a line.
   // Done in a single pass so list-state tracking stays consistent.
@@ -651,8 +684,8 @@ export function flattenRichTextForPreview(html: string): string {
   s = s.replace(/<t[dh][^>]*>/gi, '').replace(/<\/t[dh]>/gi, ' | ');
 
   // Drop any leftover unknown block tags by unwrapping them.
-  s = s.replace(/<\/(p|div|ul|ol|li|h[1-6]|blockquote|pre|tr|td|th|table)>/gi, '');
-  s = s.replace(/<(p|div|ul|ol|li|h[1-6]|blockquote|pre|tr|td|th|table)[^>]*>/gi, '');
+  s = s.replace(/<\/(pre|p|div|ul|ol|li|h[1-6]|blockquote|tr|td|th|table)>/gi, '');
+  s = s.replace(/<(pre|p|div|ul|ol|li|h[1-6]|blockquote|tr|td|th|table)[^>]*>/gi, '');
 
   // Restore line breaks: trim stray separators, collapse runs, drop blank lines.
   s = s.replace(/[ |\u0000]+(?=\u0000)/g, '\u0000');
