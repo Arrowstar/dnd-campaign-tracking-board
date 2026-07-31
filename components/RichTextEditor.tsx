@@ -182,7 +182,10 @@ export function RichTextEditor({
       }
       onChange(editor.isEmpty ? '' : editor.getHTML());
     },
-    onSelectionUpdate: () => setTick(t => t + 1),
+    onSelectionUpdate: ({ editor }) => {
+      setTick(t => t + 1);
+      if (editor.isActive('table')) setShowTableMenu(false);
+    },
     onTransaction: () => setTick(t => t + 1),
   });
 
@@ -497,138 +500,70 @@ export function RichTextEditor({
               title="Table"
               icon={<TableIcon size={13} />}
             />
-            {showTableMenu && (
+            {showTableMenu && !isActive('table') && (
               <div
                 className="absolute top-full left-0 mt-1 w-52 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
                 onMouseDown={preventDefaultBtn}
               >
-                {!isActive('table') ? (
-                  <>
-                    <div className="flex items-center justify-between px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] border-b border-[#F5F2ED] mb-1">
-                      <span className="flex items-center gap-1"><Grid3x3 size={11} /> Insert Table</span>
-                      <span className="text-[#B58D3D]">{tableHover.rows} × {tableHover.cols}</span>
-                    </div>
-                    <div className="px-2.5 pb-2">
-                      <div className="grid grid-cols-6 gap-[3px] w-fit"
-                        onMouseLeave={() => setTableHover({ rows: 3, cols: 3 })}
-                      >
-                        {Array.from({ length: 6 }).map((_, r) => (
-                          <React.Fragment key={r}>
-                            {Array.from({ length: 6 }).map((_, c) => {
-                              const lit = r < tableHover.rows && c < tableHover.cols;
-                              return (
-                                <button
-                                  key={c}
-                                  type="button"
-                                  onMouseDown={preventDefaultBtn}
-                                  onMouseEnter={() => setTableHover({ rows: r + 1, cols: c + 1 })}
-                                  onClick={() => {
-                                    setShowTableMenu(false);
-                                    run(ch => ch.insertTable({ rows: tableHover.rows, cols: tableHover.cols, withHeaderRow: true }));
-                                  }}
-                                  className={`w-3.5 h-3.5 rounded-[3px] border transition-colors ${
-                                    lit ? 'bg-[#B58D3D] border-[#B58D3D]' : 'bg-white border-[#D9D0C1] hover:border-[#B58D3D]'
-                                  }`}
-                                  title={`${r + 1} rows × ${c + 1} cols`}
-                                />
-                              );
-                            })}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                      <div className="text-[9px] text-[#8C7B6E] mt-1.5">Click to insert, drag to resize</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.mergeOrSplit()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                      title="Merge selected cells (or split a merged cell)"
-                    >
-                      <Merge size={12} /> Merge / Split Cells
-                    </button>
-                    <div className="border-t border-[#F5F2ED] my-1" />
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.addRowBefore()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <ArrowUpToLine size={12} /> Add Row Above
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.addRowAfter()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <ArrowDownToLine size={12} /> Add Row Below
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.deleteRow()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <X size={12} /> Delete Row
-                    </button>
-                    <div className="border-t border-[#F5F2ED] my-1" />
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.addColumnBefore()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <ArrowLeftToLine size={12} /> Add Column Left
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.addColumnAfter()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <ArrowRightToLine size={12} /> Add Column Right
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.deleteColumn()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <X size={12} /> Delete Column
-                    </button>
-                    <div className="border-t border-[#F5F2ED] my-1" />
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.toggleHeaderRow()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <Rows3 size={12} /> Toggle Header Row
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.toggleHeaderColumn()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                    >
-                      <Columns3 size={12} /> Toggle Header Column
-                    </button>
-                    <div className="border-t border-[#F5F2ED] my-1" />
-                    <button
-                      type="button"
-                      onMouseDown={preventDefaultBtn}
-                      onClick={() => { setShowTableMenu(false); run(c => c.deleteTable()); }}
-                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-red-700/80 flex items-center gap-2"
-                    >
-                      <Trash2 size={12} /> Delete Table
-                    </button>
-                  </>
-                )}
+                <div className="flex items-center justify-between px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] border-b border-[#F5F2ED] mb-1">
+                  <span className="flex items-center gap-1"><Grid3x3 size={11} /> Insert Table</span>
+                  <span className="text-[#B58D3D]">{tableHover.rows} × {tableHover.cols}</span>
+                </div>
+                <div className="px-2.5 pb-2">
+                  <div className="grid grid-cols-6 gap-[3px] w-fit"
+                    onMouseLeave={() => setTableHover({ rows: 3, cols: 3 })}
+                  >
+                    {Array.from({ length: 6 }).map((_, r) => (
+                      <React.Fragment key={r}>
+                        {Array.from({ length: 6 }).map((_, c) => {
+                          const lit = r < tableHover.rows && c < tableHover.cols;
+                          return (
+                            <button
+                              key={c}
+                              type="button"
+                              onMouseDown={preventDefaultBtn}
+                              onMouseEnter={() => setTableHover({ rows: r + 1, cols: c + 1 })}
+                              onClick={() => {
+                                setShowTableMenu(false);
+                                run(ch => ch.insertTable({ rows: tableHover.rows, cols: tableHover.cols, withHeaderRow: true }));
+                              }}
+                              className={`w-3.5 h-3.5 rounded-[3px] border transition-colors ${
+                                lit ? 'bg-[#B58D3D] border-[#B58D3D]' : 'bg-white border-[#D9D0C1] hover:border-[#B58D3D]'
+                              }`}
+                              title={`${r + 1} rows × ${c + 1} cols`}
+                            />
+                          );
+                        })}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  <div className="text-[9px] text-[#8C7B6E] mt-1.5">Click to insert, drag to resize</div>
+                </div>
               </div>
+            )}
+            {/* In-table controls: appear in the toolbar while the cursor is inside a table */}
+            {isActive('table') && (
+              <>
+                {divider}
+                <ToolbarButton onClick={() => run(c => c.mergeOrSplit())} title="Merge selected cells (or split a merged cell)" icon={<Merge size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.addRowBefore())} title="Add Row Above" icon={<ArrowUpToLine size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.addRowAfter())} title="Add Row Below" icon={<ArrowDownToLine size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.deleteRow())} title="Delete Row" icon={<X size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.addColumnBefore())} title="Add Column Left" icon={<ArrowLeftToLine size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.addColumnAfter())} title="Add Column Right" icon={<ArrowRightToLine size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.deleteColumn())} title="Delete Column" icon={<X size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.toggleHeaderRow())} title="Toggle Header Row" icon={<Rows3 size={13} />} />
+                <ToolbarButton onClick={() => run(c => c.toggleHeaderColumn())} title="Toggle Header Column" icon={<Columns3 size={13} />} />
+                <button
+                  type="button"
+                  onMouseDown={preventDefaultBtn}
+                  onClick={() => run(c => c.deleteTable())}
+                  className="p-1 hover:bg-black/10 rounded text-red-700/80 hover:text-red-800 transition-colors"
+                  title="Delete Table"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
             )}
           </div>
         )}
