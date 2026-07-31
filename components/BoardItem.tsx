@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, memo } from 'react';
 import { motion } from 'motion/react';
-import { BoardItem as BoardItemType, User, ItemField } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, Visibility } from '@/lib/types';
+import { canViewField } from '@/lib/fieldVisibility';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
   User as UserIcon, Minimize2, Maximize2, ExternalLink, Upload,
@@ -314,9 +315,10 @@ interface BoardItemProps {
 // Preview renderer — renders one FieldDef visually in the compact card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
+function PreviewField({ fieldId, item, user, fieldDefs, resolvedFields }: {
   fieldId: string;
   item: BoardItemType;
+  user: User;
   fieldDefs: FieldDef[] | null;
   /** Pre-resolved fields array (may include defaults merged in) */
   resolvedFields: ItemField[];
@@ -332,6 +334,12 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
         imgClassName="w-full h-full object-contain pointer-events-none select-none"
       />
     );
+  }
+
+  // ── Per-field visibility: hidden fields render as a lock chip ──
+  const field = resolvedFields.find(f => f.id === fieldId);
+  if (field?.visibility && field.visibility !== 'all' && !canViewField(field, item, user)) {
+    return <HiddenFieldChip label={field.label} visibility={field.visibility} />;
   }
 
   // ── NPC: portrait is stored in field id 'npc-image' ──
@@ -454,7 +462,26 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
   return null;
 }
 
-function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[]): PrimaryImagePreview | null {
+function HiddenFieldChip({ label, visibility }: { label: string; visibility: Visibility }) {
+  const isDm = visibility === 'dm';
+  return (
+    <div className="flex items-center gap-1 text-[9px] leading-tight min-w-0">
+      <Lock size={9} className={`flex-shrink-0 ${isDm ? 'text-purple-500/80' : 'text-amber-500/80'}`} />
+      <span className="font-bold uppercase text-[#8C7B6E] opacity-80 truncate" title={label}>
+        {label}
+      </span>
+      <span
+        className={`font-bold uppercase flex-shrink-0 px-1 py-px rounded text-[8px] ${
+          isDm ? 'bg-purple-500/10 text-purple-700' : 'bg-amber-500/10 text-amber-700'
+        }`}
+      >
+        {isDm ? 'DM only' : 'Owner only'}
+      </span>
+    </div>
+  );
+}
+
+function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[], user: User): PrimaryImagePreview | null {
   if (item.type === 'image' && item.content) {
     return {
       imageUrl: item.content,
@@ -463,7 +490,7 @@ function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[]
     };
   }
 
-  const imageField = resolvedFields.find(f => f.type === 'image' && !!f.imageUrl);
+  const imageField = resolvedFields.find(f => f.type === 'image' && !!f.imageUrl && canViewField(f, item, user));
   if (!imageField?.imageUrl) return null;
 
   const imageFieldId = imageField.id.toLowerCase();
@@ -640,7 +667,7 @@ export default memo(function BoardItem({
   })();
 
   const thresholds = lodThresholds ?? BOARD_ITEM_DEFAULT_LOD_THRESHOLDS;
-  const primaryImage = getPrimaryImagePreview(item, resolvedFields);
+  const primaryImage = getPrimaryImagePreview(item, resolvedFields, user);
   // A manually minimized card should stay header-only until it gets truly
   // tiny; don't unexpectedly expand it into the image-forward tier.
   const hasImageForLod = !item.minimized && !!primaryImage;
@@ -692,9 +719,9 @@ export default memo(function BoardItem({
         if (item.type === 'image') {
           onUpdate({ ...item, content: imageUrl });
         } else {
-          // Update the first image-type field
+          // Update the first image-type field the user is allowed to see
           const currentFields = resolvedFields;
-          const imgField = currentFields.find(f => f.type === 'image');
+          const imgField = currentFields.find(f => f.type === 'image' && canViewField(f, item, user));
           if (imgField) {
             const updatedFields = currentFields.map(f =>
               f.id === imgField.id ? { ...f, imageUrl } : f
@@ -717,7 +744,7 @@ export default memo(function BoardItem({
         onUpdate({ ...item, content: url.trim() });
       } else {
         const currentFields = resolvedFields;
-        const imgField = currentFields.find(f => f.type === 'image');
+        const imgField = currentFields.find(f => f.type === 'image' && canViewField(f, item, user));
         if (imgField) {
           const updatedFields = currentFields.map(f =>
             f.id === imgField.id ? { ...f, imageUrl: url.trim() } : f
@@ -728,10 +755,10 @@ export default memo(function BoardItem({
     }
   };
 
-  // Determine if this item can accept an image drop (image type or has at least one image field)
+  // Determine if this item can accept an image drop (image type or has at least one visible image field)
   const canAcceptImageDrop = canEdit && (
     item.type === 'image' ||
-    resolvedFields.some(f => f.type === 'image')
+    resolvedFields.some(f => f.type === 'image' && canViewField(f, item, user))
   );
 
   const handleItemPointerDown = (e: React.PointerEvent<HTMLElement>) => {
@@ -1119,7 +1146,7 @@ export default memo(function BoardItem({
           onPointerDownCapture={e => e.stopPropagation()}
         >
           {previewFieldIds.map(fid => (
-            <PreviewField key={fid} fieldId={fid} item={item} fieldDefs={fieldDefs} resolvedFields={resolvedFields} />
+            <PreviewField key={fid} fieldId={fid} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} />
           ))}
           {/* Subtle hover gradient */}
           <div className="absolute inset-0 rounded-[5px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"

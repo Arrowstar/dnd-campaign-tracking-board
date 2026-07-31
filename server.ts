@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { promisify } from 'util';
+import { scrubTabsForUser, mergeTabsForSave, Viewer } from './lib/fieldVisibility';
 
 // promisify crypto.scrypt — the overload that returns Buffer
 const scryptAsync = promisify<string | Buffer, string | Buffer, number, Buffer>(
@@ -139,7 +140,7 @@ nextApp.prepare().then(async () => {
   // ─── Socket.IO (real-time board sync) ──────────────────────────────────────
 
   io.on('connection', (socket) => {
-    let currentUser: { id: string; username: string; role: string; boardId: string } | null = null;
+    let currentUser: { id: string; username: string; role: 'dm' | 'player'; boardId: string } | null = null;
 
     socket.on('join_board', ({ boardId, sessionToken }: { boardId: string; sessionToken: string }) => {
       try {
@@ -153,6 +154,7 @@ nextApp.prepare().then(async () => {
         if (!member) { socket.emit('board_error', 'Not a board member'); return; }
 
         currentUser = { id: user.id, username: user.displayName, role: member.role, boardId };
+        socket.data.userId = user.id;
         socket.join(boardId);
         socket.to(boardId).emit('user_joined', { id: user.id, username: user.displayName, role: member.role });
       } catch (err) {
@@ -165,9 +167,22 @@ nextApp.prepare().then(async () => {
         if (!currentUser) return;
         const board = state.boards[currentUser.boardId];
         if (!board || !board.members[currentUser.id]) return;
-        board.tabs = data.tabs || [];
+        // Merge so clients can never overwrite/delete content they can't see.
+        board.tabs = mergeTabsForSave(board.tabs || [], data.tabs || [], {
+          id: currentUser.id,
+          role: currentUser.role,
+        });
         saveData();
-        socket.to(currentUser.boardId).emit('board_update', { tabs: board.tabs });
+        // Broadcast a per-recipient scrubbed copy of the board state.
+        io.in(currentUser.boardId).fetchSockets().then((sockets) => {
+          for (const s of sockets) {
+            const uid = (s.data?.userId as string | undefined);
+            if (!uid) continue;
+            const member = board.members[uid];
+            if (!member) continue;
+            s.emit('board_update', { tabs: scrubTabsForUser(board.tabs || [], { id: uid, role: member.role }) });
+          }
+        });
       } catch (err) {
         console.error('Error in update_board:', err);
       }
@@ -440,7 +455,9 @@ nextApp.prepare().then(async () => {
       userId: user.id,
       username: user.displayName,
       role: member.role,
-      tabs: board.tabs || [],
+      // Strip per-field restricted content (e.g. DM-only fields) before
+      // sending — the stored data is never mutated.
+      tabs: scrubTabsForUser(board.tabs || [], { id: user.id, role: member.role }),
     });
   });
 
@@ -457,11 +474,22 @@ nextApp.prepare().then(async () => {
       if (!member) return res.status(403).json({ error: 'You are not a member of this board.' });
 
       const { tabs } = req.body as { tabs?: any[] };
-      if (tabs) board.tabs = tabs;
+      if (tabs) {
+        // Merge so clients can never overwrite/delete content they can't see.
+        board.tabs = mergeTabsForSave(board.tabs || [], tabs, { id: user.id, role: member.role });
+      }
       await saveData();
 
-      // Broadcast to other connected clients on this board
-      io.to(req.params.id).emit('board_update', { tabs: board.tabs });
+      // Broadcast per-recipient scrubbed copies to other connected clients on this board
+      io.in(req.params.id).fetchSockets().then((sockets) => {
+        for (const s of sockets) {
+          const uid = (s.data?.userId as string | undefined);
+          if (!uid) continue;
+          const m = board.members[uid];
+          if (!m) continue;
+          s.emit('board_update', { tabs: scrubTabsForUser(board.tabs || [], { id: uid, role: m.role }) });
+        }
+      });
 
       res.json({ success: true });
     } catch (err) {

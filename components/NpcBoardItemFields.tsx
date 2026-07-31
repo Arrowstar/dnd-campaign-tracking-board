@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { BoardItem, ItemField, AttachedFile, FieldType, User } from '@/lib/types';
-import { 
+import {
   FileText, 
   Image as ImageIcon, 
   Paperclip, 
@@ -17,11 +17,14 @@ import {
   X,
   Tag,
   Sparkles,
-  UserCheck
+  UserCheck,
+  Lock
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { fileToCompressedDataURL, uploadFileToBlob } from '@/lib/utils';
+import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
+import { FieldVisibilityToggle } from './StructuredBoardItemFields';
 
 interface NpcBoardItemFieldsProps {
   item: BoardItem;
@@ -67,56 +70,56 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
 };
 
 export function getDefaultNpcFields(existingContent?: string): ItemField[] {
-  return [
+  const defaultFields: Array<{ id: string; label: string; build: () => ItemField }> = [
     {
       id: 'npc-image',
       label: 'Character Portrait',
-      type: 'image',
-      imageUrl: '',
-      lines: []
+      build: () => ({ id: 'npc-image', label: 'Character Portrait', type: 'image' as const, imageUrl: '', lines: [] }),
     },
     {
       id: 'npc-personality-traits',
       label: 'Personality & Traits',
-      type: 'text',
-      textValue: stringifyPersonalityTraits({
-        personality: '',
-        quirks: '',
-        goals: '',
-        alignment: '',
-        physical: '',
-        other: ''
-      })
+      build: () => ({
+        id: 'npc-personality-traits',
+        label: 'Personality & Traits',
+        type: 'text' as const,
+        textValue: stringifyPersonalityTraits({
+          personality: '',
+          quirks: '',
+          goals: '',
+          alignment: '',
+          physical: '',
+          other: ''
+        })
+      }),
     },
     {
       id: 'npc-location',
       label: 'Where Met / Location',
-      type: 'text',
-      textValue: ''
+      build: () => ({ id: 'npc-location', label: 'Where Met / Location', type: 'text' as const, textValue: '' }),
     },
     {
       id: 'npc-history',
       label: 'History of Interactions',
-      type: 'text',
-      textValue: ''
+      build: () => ({ id: 'npc-history', label: 'History of Interactions', type: 'text' as const, textValue: '' }),
     },
     {
       id: 'npc-other',
       label: 'Other Notes',
-      type: 'text',
-      textValue: existingContent || ''
+      build: () => ({ id: 'npc-other', label: 'Other Notes', type: 'text' as const, textValue: existingContent || '' }),
     },
     {
       id: 'npc-files',
       label: 'Associated Files & Links',
-      type: 'file',
-      files: []
-    }
+      build: () => ({ id: 'npc-files', label: 'Associated Files & Links', type: 'file' as const, files: [] }),
+    },
   ];
+  return defaultFields.map(f => ({ ...f.build(), visibility: inferFieldVisibility(f.label) }));
 }
 
 export default function NpcBoardItemFields({
   item,
+  user,
   canEdit,
   isLight,
   onUpdate
@@ -239,6 +242,7 @@ export default function NpcBoardItemFields({
       id: 'field-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       label: newFieldLabel.trim(),
       type: newFieldType,
+      visibility: inferFieldVisibility(newFieldLabel.trim()),
       textValue: newFieldType === 'text' ? '' : undefined,
       imageUrl: newFieldType === 'image' ? '' : undefined,
       files: newFieldType === 'file' ? [] : undefined,
@@ -564,6 +568,7 @@ export default function NpcBoardItemFields({
     >
       {fields.map((field) => {
         const isPersonalityBox = field.id === 'npc-personality-traits' || field.label === 'Personality & Traits';
+        const canView = canViewField(field, item, user);
 
         return (
           <div 
@@ -627,8 +632,13 @@ export default function NpcBoardItemFields({
                 )}
               </div>
 
-              {canEdit && (
+              {canEdit && canView && (
                 <div className="flex items-center gap-1 flex-shrink-0 ml-1" data-interactive="true">
+                  <FieldVisibilityToggle
+                    value={field.visibility}
+                    canSetDm={user.role === 'dm'}
+                    onChange={(vis) => handleUpdateField(field.id, { visibility: vis })}
+                  />
                   {field.type === 'text' && !isPersonalityBox && (
                     <button
                       type="button"
@@ -684,7 +694,16 @@ export default function NpcBoardItemFields({
             </div>
 
             {/* Field Body by Type */}
-            {isPersonalityBox ? (
+            {!canView ? (
+              <div className="flex items-center gap-2 p-3 text-[11px] text-[#8C7B6E]">
+                <Lock size={12} className={field.visibility === 'dm' ? 'text-purple-500' : 'text-amber-500'} />
+                <span>
+                  {field.visibility === 'dm'
+                    ? `This field is hidden from you — DM only.`
+                    : `This field is hidden from you — visible only to the item owner.`}
+                </span>
+              </div>
+            ) : isPersonalityBox ? (
               renderPersonalityTraitsBox(field)
             ) : (
               <div className="p-2.5">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth';
+import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
 
 export const runtime = 'nodejs';
 
@@ -29,7 +30,9 @@ export async function GET(
       userId: user.id,
       username: user.displayName,
       role: member.role,
-      tabs: board.tabs || [],
+      // Strip per-field restricted content (e.g. DM-only fields) before
+      // sending — the stored data is never mutated.
+      tabs: scrubTabsForUser(board.tabs || [], { id: user.id, role: member.role }),
     });
   } catch (err) {
     console.error('Load board state error:', err);
@@ -59,7 +62,12 @@ export async function POST(
 
     const { tabs } = (await request.json()) as { tabs?: any[] };
     if (tabs) {
-      await sql`UPDATE boards SET tabs = ${JSON.stringify(tabs)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
+      // Merge on top of stored state so clients can never overwrite or delete
+      // content they are not permitted to see (per-field visibility, item ownership).
+      const storedRows = await sql`SELECT tabs FROM boards WHERE id = ${boardId} LIMIT 1`;
+      const storedTabs: any[] = storedRows[0]?.tabs || [];
+      const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role });
+      await sql`UPDATE boards SET tabs = ${JSON.stringify(merged)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
     }
 
     return NextResponse.json({ success: true });

@@ -38,6 +38,9 @@ export type ItemField = {
   imageUrl?: string;
   lines?: DrawingLine[];
   files?: AttachedFile[];
+  /** Per-field visibility. Undefined/'all' = everyone on the board can see it.
+   *  'dm' = only the DM. 'owner' = only the item's owner. */
+  visibility?: Visibility;
 };
 
 export type BoardItem = {

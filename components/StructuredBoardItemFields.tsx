@@ -20,10 +20,14 @@ import {
   Search,
   Unlink,
   ArrowUpRight as JumpIcon,
+  Globe,
+  Eye,
+  Lock,
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { fileToCompressedDataURL, uploadFileToBlob } from '@/lib/utils';
+import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
 import {
   parseTokens,
   addLinkToValue,
@@ -78,16 +82,17 @@ export function stringifyStructured(data: Record<string, string>): string {
 /** Build default ItemField[] from a FieldDef[] config. */
 export function buildDefaultFields(defs: FieldDef[], existingContent?: string): ItemField[] {
   return defs.map((def) => {
+    const visibility = inferFieldVisibility(def.label);
     if (def.type === 'structured') {
       const init: Record<string, string> = {};
       (def.structuredKeys || []).forEach((k) => { init[k.key] = ''; });
-      return { id: def.id, label: def.label, type: 'text' as FieldType, textValue: stringifyStructured(init) };
+      return { id: def.id, label: def.label, type: 'text' as FieldType, textValue: stringifyStructured(init), visibility };
     }
     if (def.type === 'image') {
-      return { id: def.id, label: def.label, type: 'image', imageUrl: '', lines: [] };
+      return { id: def.id, label: def.label, type: 'image', imageUrl: '', lines: [], visibility };
     }
     if (def.type === 'file') {
-      return { id: def.id, label: def.label, type: 'file', files: [] };
+      return { id: def.id, label: def.label, type: 'file', files: [], visibility };
     }
     // text
     return {
@@ -95,8 +100,52 @@ export function buildDefaultFields(defs: FieldDef[], existingContent?: string): 
       label: def.label,
       type: 'text',
       textValue: def.isContentField ? (existingContent || '') : '',
+      visibility,
     };
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Field visibility toggle (shared with NpcBoardItemFields)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FIELD_VIS_OPTIONS = [
+  { id: 'all' as const, label: 'Everyone', icon: Globe, iconColor: 'text-green-600', title: 'Visible to everyone on the board' },
+  { id: 'dm' as const, label: 'DM Only', icon: Eye, iconColor: 'text-purple-600', title: 'Visible only to the DM' },
+  { id: 'owner' as const, label: 'Owner Only', icon: Lock, iconColor: 'text-amber-600', title: 'Visible only to the item owner' },
+];
+
+export function FieldVisibilityToggle({
+  value,
+  canSetDm,
+  onChange,
+  size = 11,
+}: {
+  value?: 'all' | 'dm' | 'owner';
+  canSetDm: boolean;
+  onChange: (next: 'all' | 'dm' | 'owner') => void;
+  size?: number;
+}) {
+  const order: ('all' | 'dm' | 'owner')[] = canSetDm ? ['all', 'dm', 'owner'] : ['all', 'owner'];
+  const current = value && order.includes(value) ? value : 'all';
+  const currentOpt = FIELD_VIS_OPTIONS.find(o => o.id === current) || FIELD_VIS_OPTIONS[0];
+  const CurrentIcon = currentOpt.icon;
+  const nextIdx = (order.indexOf(current) + 1) % order.length;
+  const nextOpt = FIELD_VIS_OPTIONS.find(o => o.id === order[nextIdx]) || FIELD_VIS_OPTIONS[0];
+  return (
+    <button
+      type="button"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(order[nextIdx]);
+      }}
+      className="p-1 rounded transition-colors cursor-pointer flex-shrink-0"
+      title={`Field visibility: ${currentOpt.title}. Click to switch to "${nextOpt.label}".`}
+    >
+      <CurrentIcon size={size} className={currentOpt.iconColor} />
+    </button>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +191,7 @@ const TYPE_BADGE_STYLES: Record<string, { bg: string; text: string; border: stri
 
 export default function StructuredBoardItemFields({
   item,
+  user,
   canEdit,
   isLight,
   onUpdate,
@@ -217,6 +267,7 @@ export default function StructuredBoardItemFields({
       id: 'field-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       label: newFieldLabel.trim(),
       type: newFieldType,
+      visibility: inferFieldVisibility(newFieldLabel.trim()),
       textValue: newFieldType === 'text' ? '' : undefined,
       imageUrl: newFieldType === 'image' ? '' : undefined,
       files: newFieldType === 'file' ? [] : undefined,
@@ -855,6 +906,7 @@ export default function StructuredBoardItemFields({
     <div className="flex flex-col gap-3 font-sans w-full" onPointerDown={(e) => e.stopPropagation()}>
       {fields.map((field) => {
         const structured = isStructuredBox(field);
+        const canView = canViewField(field, item, user);
         return (
           <div key={field.id} className={`flex flex-col rounded-md border transition-all ${isLight ? 'bg-white/80 border-[#D9D0C1] shadow-sm' : 'bg-black/10 border-black/20'}`}>
             {/* Field Label Header */}
@@ -889,8 +941,13 @@ export default function StructuredBoardItemFields({
                 )}
               </div>
 
-              {canEdit && (
+              {canEdit && canView && (
                 <div className="flex items-center gap-1 flex-shrink-0 ml-1" data-interactive="true">
+                  <FieldVisibilityToggle
+                    value={field.visibility}
+                    canSetDm={user.role === 'dm'}
+                    onChange={(vis) => handleUpdateField(field.id, { visibility: vis })}
+                  />
                   {field.type === 'text' && !structured && (
                     <button
                       type="button"
@@ -914,10 +971,23 @@ export default function StructuredBoardItemFields({
             </div>
 
             {/* Field Body */}
-            {structured && renderStructuredBox(field)}
-            {!structured && field.type === 'text' && renderTextField(field)}
-            {!structured && field.type === 'image' && renderImageField(field)}
-            {!structured && field.type === 'file' && renderFileField(field)}
+            {canView ? (
+              <>
+                {structured && renderStructuredBox(field)}
+                {!structured && field.type === 'text' && renderTextField(field)}
+                {!structured && field.type === 'image' && renderImageField(field)}
+                {!structured && field.type === 'file' && renderFileField(field)}
+              </>
+            ) : (
+              <div className="flex items-center gap-2 p-3 text-[11px] text-[#8C7B6E]">
+                <Lock size={12} className={field.visibility === 'dm' ? 'text-purple-500' : 'text-amber-500'} />
+                <span>
+                  {field.visibility === 'dm'
+                    ? `This field is hidden from you — DM only.`
+                    : `This field is hidden from you — visible only to the item owner.`}
+                </span>
+              </div>
+            )}
           </div>
         );
       })}

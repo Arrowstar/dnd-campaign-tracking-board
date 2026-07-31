@@ -457,6 +457,7 @@ export default function FocusDrawer({
                 <div className="flex flex-col gap-2">
                   {fieldDefs.map(def => {
                     const isOn = effectivePreviewFields.includes(def.id);
+                    const fieldVis = item.fields?.find(f => f.id === def.id)?.visibility;
                     return (
                       <label
                         key={def.id}
@@ -473,7 +474,15 @@ export default function FocusDrawer({
                           className="w-4 h-4 accent-[#B58D3D]"
                         />
                         <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold">{def.label}</span>
+                          <span className="text-xs font-bold flex items-center gap-1.5">
+                            {def.label}
+                            {fieldVis === 'dm' && (
+                              <span title="DM only field"><Eye size={11} className="text-purple-500" /></span>
+                            )}
+                            {fieldVis === 'owner' && (
+                              <span title="Owner only field"><Lock size={11} className="text-amber-500" /></span>
+                            )}
+                          </span>
                           <span className="text-[10px] opacity-70 capitalize">{def.type} field</span>
                         </div>
                         {isOn && <LayoutGrid size={13} className="ml-auto text-[#B58D3D]" />}
@@ -521,6 +530,7 @@ function NpcPreviewFieldSelector({
     <div className="flex flex-col gap-2">
       {NPC_PREVIEW_FIELD_OPTIONS.map(def => {
         const isOn = effectiveFields.includes(def.id);
+        const fieldVis = item.fields?.find(f => f.id === def.id)?.visibility;
         return (
           <label
             key={def.id}
@@ -537,7 +547,15 @@ function NpcPreviewFieldSelector({
               className="w-4 h-4 accent-[#B58D3D]"
             />
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold">{def.label}</span>
+              <span className="text-xs font-bold flex items-center gap-1.5">
+                {def.label}
+                {fieldVis === 'dm' && (
+                  <span title="DM only field"><Eye size={11} className="text-purple-500" /></span>
+                )}
+                {fieldVis === 'owner' && (
+                  <span title="Owner only field"><Lock size={11} className="text-amber-500" /></span>
+                )}
+              </span>
               <span className="text-[10px] opacity-70 capitalize">{def.type} field</span>
             </div>
             {isOn && <LayoutGrid size={13} className="ml-auto text-[#B58D3D]" />}
