@@ -15,7 +15,6 @@ import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
-import { io } from 'socket.io-client';
 import { syncLinkTitles } from '@/lib/crossref';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
@@ -134,6 +133,10 @@ export default function Board({ boardId }: { boardId: string }) {
   const setTransformRef = useRef<((x: number, y: number, scale: number, animTime?: number) => void) | null>(null);
   const [zoomScale, setZoomScale] = useState<number>(100);
 
+  // Revision of the board state whose full payload we last applied locally.
+  // The realtime poller only downloads the full board when this changes.
+  const appliedRevisionRef = useRef<string | null>(null);
+
   const getItemRectInContainer = useCallback((itemId: string, fallbackItem: BoardItemType) => {
     const drag = dragOffsets[itemId];
     return {
@@ -230,7 +233,7 @@ export default function Board({ boardId }: { boardId: string }) {
         }
         return res.json();
       })
-      .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[] } | null) => {
+      .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; updatedAt?: string | null } | null) => {
         if (!data) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser({
@@ -240,6 +243,9 @@ export default function Board({ boardId }: { boardId: string }) {
           boardId,
           sessionToken: sessionToken!,
         });
+        if (typeof data.updatedAt === 'string' && data.updatedAt) {
+          appliedRevisionRef.current = data.updatedAt;
+        }
         let parsedTabs: BoardTab[] = [];
         if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
           parsedTabs = data.tabs;
@@ -257,28 +263,105 @@ export default function Board({ boardId }: { boardId: string }) {
       .catch(err => console.error('Failed to load board:', err));
   }, [boardId]);
 
-  // Real-time socket sync & kick notifications
+  // Real-time sync via revision polling: a cheap revision request every few
+  // seconds tells us if the board changed elsewhere; the full (per-user
+  // scrubbed) state is only downloaded when it did. Also covers kick
+  // detection — a 403 on the revision endpoint means we're no longer a member.
   useEffect(() => {
     if (!user || !user.sessionToken) return;
-    const socket = io();
 
-    socket.emit('join_board', { boardId, sessionToken: user.sessionToken });
+    const POLL_INTERVAL_MS = 3000;
+    let cancelled = false;
+    let inFlight = false;
 
-    socket.on('board_update', (data: { tabs: BoardTab[] }) => {
-      if (data && data.tabs) {
-        setTabs(data.tabs);
+    const isActivelyEditing = () => {
+      const el = document.activeElement;
+      return !!el &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable);
+    };
+
+    const handleMembershipLost = () => {
+      alert('You have been removed from this campaign by the Dungeon Master.');
+      window.location.href = '/';
+    };
+
+    const handleSessionLost = () => {
+      window.location.href = '/';
+    };
+
+    const applyFullState = async (): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/boards/${boardId}/state`, {
+          headers: { Authorization: `Bearer ${user.sessionToken}` },
+        });
+        if (res.status === 401) {
+          handleSessionLost();
+          return false;
+        }
+        if (res.status === 403) {
+          handleMembershipLost();
+          return false;
+        }
+        if (!res.ok) return false;
+        const data = (await res.json()) as { tabs: BoardTab[] | undefined };
+        if (cancelled || !data.tabs || !Array.isArray(data.tabs)) return false;
+        const freshTabs: BoardTab[] = data.tabs;
+        setTabs(freshTabs);
+        setActiveTabId(prev => {
+          if (freshTabs.some(t => t.id === prev)) return prev;
+          return freshTabs[0]?.id || 'default-tab';
+        });
+        return true;
+      } catch (err) {
+        console.error('Failed to refresh board state:', err);
+        return false;
       }
-    });
+    };
 
-    socket.on('member_kicked', (data: { targetUserId: string }) => {
-      if (data.targetUserId === user.id) {
-        alert('You have been removed from this campaign by the Dungeon Master.');
-        window.location.href = '/';
+    const poll = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const res = await fetch(`/api/boards/${boardId}/revision`, {
+          headers: { Authorization: `Bearer ${user.sessionToken}` },
+        });
+        if (res.status === 401) {
+          handleSessionLost();
+          return;
+        }
+        if (res.status === 403) {
+          handleMembershipLost();
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const revision = data.updatedAt ?? null;
+        if (revision === null || revision === appliedRevisionRef.current) return;
+        // Never yank state mid-edit; the revision is only marked as applied
+        // once the full state actually landed, so we retry after typing stops.
+        if (isActivelyEditing()) return;
+        if (await applyFullState()) {
+          appliedRevisionRef.current = revision;
+        }
+      } catch (err) {
+        console.error('Failed to check board revision:', err);
+      } finally {
+        inFlight = false;
       }
-    });
+    };
+
+    const intervalId = setInterval(poll, POLL_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    window.addEventListener('focus', poll);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
-      socket.disconnect();
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('focus', poll);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [boardId, user]);
 
@@ -318,6 +401,12 @@ export default function Board({ boardId }: { boardId: string }) {
                 : "Your last change couldn't be saved. Retrying automatically."
             );
             return;
+          }
+          // The save echo includes the new revision, so the realtime poller
+          // knows this board state is already applied locally and skips it.
+          const saved = await res.json().catch(() => null);
+          if (saved && typeof saved.updatedAt === 'string' && saved.updatedAt) {
+            appliedRevisionRef.current = saved.updatedAt;
           }
           setSaveError(null);
         } catch (err) {

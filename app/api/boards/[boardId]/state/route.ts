@@ -18,7 +18,7 @@ export async function GET(
     await ensureSchema();
     const sql = getSql();
 
-    const rows = await sql`SELECT members, tabs FROM boards WHERE id = ${boardId} LIMIT 1`;
+    const rows = await sql`SELECT members, tabs, updated_at FROM boards WHERE id = ${boardId} LIMIT 1`;
     if (rows.length === 0) return NextResponse.json({ error: 'Board not found.' }, { status: 404 });
 
     const board = rows[0];
@@ -31,6 +31,7 @@ export async function GET(
       userId: user.id,
       username: user.displayName,
       role: member.role,
+      updatedAt: board.updated_at ?? null,
       // Strip per-field restricted content (e.g. DM-only fields) before
       // sending — the stored data is never mutated.
       tabs: scrubTabsForUser(board.tabs || [], { id: user.id, role: member.role }),
@@ -62,6 +63,7 @@ export async function POST(
     }
 
     const { tabs } = (await request.json()) as { tabs?: any[] };
+    let updatedAt: string | null = null;
     if (tabs) {
       // Merge on top of stored state so clients can never overwrite or delete
       // content they are not permitted to see (per-field visibility, item ownership).
@@ -70,10 +72,16 @@ export async function POST(
       const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role });
       // Keep link-token title snapshots in sync with item titles.
       const synced = syncLinkTitles(merged);
-      await sql`UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
+      const updated = await sql`
+        UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
+        RETURNING updated_at
+      `;
+      updatedAt = updated[0]?.updated_at ?? null;
     }
 
-    return NextResponse.json({ success: true });
+    // Echo the revision back so the saving client can skip re-fetching the
+    // full board state it already has.
+    return NextResponse.json({ success: true, updatedAt });
   } catch (err) {
     console.error('Save board state error:', err);
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
