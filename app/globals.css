@@ -143,6 +143,7 @@ body {
   padding: 0.25rem 0.5rem;
   vertical-align: top;
   min-width: 3rem;
+  position: relative;
 }
 
 .rich-text-content table th {
@@ -152,7 +153,11 @@ body {
 }
 
 .rich-text-content table .selectedCell::after {
-  background: rgba(181, 141, 61, 0.15);
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(181, 141, 61, 0.22);
+  pointer-events: none;
 }
 
 /* Line-clamped card preview (flattened rich text) */
