@@ -498,13 +498,6 @@ export default memo(function BoardItem({
   // starve the rest of the header row (badge/controls) of space.
   const titleFontSize = Math.min(16, Math.max(10, 13 / zoomScale));
 
-  // Per-item LOD tier based on rendered pixel size (computed after resolvedFields)
-  const prevTierRef = useRef<number>(0);
-  const effW = item.width * zoomScale;
-  const hasImage = item.type === 'image' || resolvedFields.some(f => f.type === 'image' && !!f.imageUrl);
-  const tier = getTier(effW, hasImage, prevTierRef.current);
-  prevTierRef.current = tier;
-
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewFieldIds = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
 
@@ -516,6 +509,13 @@ export default memo(function BoardItem({
     const saved = item.fields || [];
     return defaults.map(def => saved.find(s => s.id === def.id) ?? def);
   })();
+
+  // Per-item LOD tier based on rendered pixel size (computed after resolvedFields)
+  const prevTierRef = useRef<number>(0);
+  const effW = item.width * zoomScale;
+  const hasImage = item.type === 'image' || resolvedFields.some(f => f.type === 'image' && !!f.imageUrl);
+  const tier = getTier(effW, hasImage, prevTierRef.current);
+  prevTierRef.current = tier;
 
   // ── Drag-and-drop image onto this card ──────────────────────────────────────
   const [isDraggingOver, setIsDraggingOver] = useState(false);
