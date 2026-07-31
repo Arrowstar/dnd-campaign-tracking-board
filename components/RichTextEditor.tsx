@@ -40,8 +40,13 @@ import {
   Columns3,
   Rows3,
   Trash2,
-  Plus,
   X,
+  Merge,
+  Grid3x3,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ArrowLeftToLine,
+  ArrowRightToLine,
 } from 'lucide-react';
 
 interface RichTextEditorProps {
@@ -143,6 +148,7 @@ export function RichTextEditor({
   const [showFontSizePicker, setShowFontSizePicker] = useState(false);
   const [showHeadingPicker, setShowHeadingPicker] = useState(false);
   const [showTableMenu, setShowTableMenu] = useState(false);
+  const [tableHover, setTableHover] = useState({ rows: 3, cols: 3 });
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextUpdate = useRef(false);
@@ -493,31 +499,73 @@ export function RichTextEditor({
             />
             {showTableMenu && (
               <div
-                className="absolute top-full left-0 mt-1 w-40 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
+                className="absolute top-full left-0 mt-1 w-52 bg-white border border-[#D9D0C1] rounded shadow-xl py-1 z-50 text-left font-sans"
                 onMouseDown={preventDefaultBtn}
               >
-                {!isActive('table') && (
-                  <button
-                    type="button"
-                    onMouseDown={preventDefaultBtn}
-                    onClick={() => {
-                      setShowTableMenu(false);
-                      run(c => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }));
-                    }}
-                    className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
-                  >
-                    <Plus size={12} /> Insert Table (3x3)
-                  </button>
-                )}
-                {isActive('table') && (
+                {!isActive('table') ? (
                   <>
+                    <div className="flex items-center justify-between px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] border-b border-[#F5F2ED] mb-1">
+                      <span className="flex items-center gap-1"><Grid3x3 size={11} /> Insert Table</span>
+                      <span className="text-[#B58D3D]">{tableHover.rows} × {tableHover.cols}</span>
+                    </div>
+                    <div className="px-2.5 pb-2">
+                      <div className="grid grid-cols-6 gap-[3px] w-fit"
+                        onMouseLeave={() => setTableHover({ rows: 3, cols: 3 })}
+                      >
+                        {Array.from({ length: 6 }).map((_, r) => (
+                          <React.Fragment key={r}>
+                            {Array.from({ length: 6 }).map((_, c) => {
+                              const lit = r < tableHover.rows && c < tableHover.cols;
+                              return (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onMouseDown={preventDefaultBtn}
+                                  onMouseEnter={() => setTableHover({ rows: r + 1, cols: c + 1 })}
+                                  onClick={() => {
+                                    setShowTableMenu(false);
+                                    run(ch => ch.insertTable({ rows: tableHover.rows, cols: tableHover.cols, withHeaderRow: true }));
+                                  }}
+                                  className={`w-3.5 h-3.5 rounded-[3px] border transition-colors ${
+                                    lit ? 'bg-[#B58D3D] border-[#B58D3D]' : 'bg-white border-[#D9D0C1] hover:border-[#B58D3D]'
+                                  }`}
+                                  title={`${r + 1} rows × ${c + 1} cols`}
+                                />
+                              );
+                            })}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      <div className="text-[9px] text-[#8C7B6E] mt-1.5">Click to insert, drag to resize</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.mergeOrSplit()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                      title="Merge selected cells (or split a merged cell)"
+                    >
+                      <Merge size={12} /> Merge / Split Cells
+                    </button>
+                    <div className="border-t border-[#F5F2ED] my-1" />
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.addRowBefore()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <ArrowUpToLine size={12} /> Add Row Above
+                    </button>
                     <button
                       type="button"
                       onMouseDown={preventDefaultBtn}
                       onClick={() => { setShowTableMenu(false); run(c => c.addRowAfter()); }}
                       className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
                     >
-                      <Rows3 size={12} /> Add Row
+                      <ArrowDownToLine size={12} /> Add Row Below
                     </button>
                     <button
                       type="button"
@@ -527,13 +575,22 @@ export function RichTextEditor({
                     >
                       <X size={12} /> Delete Row
                     </button>
+                    <div className="border-t border-[#F5F2ED] my-1" />
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.addColumnBefore()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <ArrowLeftToLine size={12} /> Add Column Left
+                    </button>
                     <button
                       type="button"
                       onMouseDown={preventDefaultBtn}
                       onClick={() => { setShowTableMenu(false); run(c => c.addColumnAfter()); }}
                       className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
                     >
-                      <Columns3 size={12} /> Add Column
+                      <ArrowRightToLine size={12} /> Add Column Right
                     </button>
                     <button
                       type="button"
@@ -542,6 +599,23 @@ export function RichTextEditor({
                       className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
                     >
                       <X size={12} /> Delete Column
+                    </button>
+                    <div className="border-t border-[#F5F2ED] my-1" />
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.toggleHeaderRow()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <Rows3 size={12} /> Toggle Header Row
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={preventDefaultBtn}
+                      onClick={() => { setShowTableMenu(false); run(c => c.toggleHeaderColumn()); }}
+                      className="w-full text-left px-2.5 py-1 text-xs hover:bg-[#F5F2ED] text-[#2C2824] flex items-center gap-2"
+                    >
+                      <Columns3 size={12} /> Toggle Header Column
                     </button>
                     <div className="border-t border-[#F5F2ED] my-1" />
                     <button
@@ -677,11 +751,26 @@ export function flattenRichTextForPreview(html: string): string {
     return '<span class="rt-preview-bullet">\u2022</span> ';
   });
 
-  // Tables: rows on separate lines, cells joined with |.
-  s = s.replace(/<table[^>]*>/gi, '').replace(/<\/table>/gi, '');
-  s = s.replace(/<thead[^>]*>|<\/thead>|<tbody[^>]*>|<\/tbody>|<tfoot[^>]*>|<\/tfoot>/gi, '');
-  s = s.replace(/<tr[^>]*>/gi, '').replace(/<\/tr>/gi, '\u0000');
-  s = s.replace(/<t[dh][^>]*>/gi, '').replace(/<\/t[dh]>/gi, ' | ');
+  // Tables: rows on separate lines, cells joined with |. Cell content is
+  // collapsed to a single line — TipTap wraps cell content in <p>, which
+  // would otherwise put a line break before every cell separator.
+  s = s.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (tableHtml) => {
+    const rows = tableHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) ?? [];
+    const lines: string[] = [];
+    for (const row of rows) {
+      const cells = row.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? [];
+      const texts = cells.map(cell =>
+        cell
+          .replace(/^<t[dh][^>]*>/i, '')
+          .replace(/<\/t[dh]>$/i, '')
+          .replace(/\u0000+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      );
+      lines.push(texts.join(' | '));
+    }
+    return lines.join('\u0000') + (lines.length ? '\u0000' : '');
+  });
 
   // Drop any leftover unknown block tags by unwrapping them.
   s = s.replace(/<\/(pre|p|div|ul|ol|li|h[1-6]|blockquote|tr|td|th|table)>/gi, '');
