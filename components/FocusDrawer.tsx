@@ -489,7 +489,7 @@ export default function FocusDrawer({
                     More columns let short fields flow side by side.
                   </p>
                 </div>
-                <CardPreviewMini layout={previewLayout} item={item} fieldDefs={fieldDefs} />
+                <CardPreviewMini layout={previewLayout} item={item} fieldDefs={fieldDefs} canEdit={canEdit} onUpdate={onUpdate} />
               </div>
 
               {item.type === 'npc' ? (
@@ -523,7 +523,7 @@ export default function FocusDrawer({
               )}
 
               <div className="pt-3 border-t border-[#D9D0C1] text-[10px] text-[#8C7B6E]">
-                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields. Open the sliders on a field to switch between partial/full width, hero banners vs thumbnails, and line clamps for long text. Images on the card can be annotated directly — draw on them with the pen tool.
+                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields, or drag the blocks in the mini preview directly. Open the sliders on a field to switch between partial/full width, hero banners vs thumbnails, and line clamps for long text.
               </div>
             </div>
           )}
@@ -767,11 +767,63 @@ function hasPreviewContent(item: BoardItemType, slot: PreviewFieldSlot, fieldTyp
   return !!field.textValue && field.textValue.replace(/<[^>]*>/g, '').trim().length > 0;
 }
 
-function CardPreviewMini({ layout, item, fieldDefs }: {
+function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   layout: PreviewLayout;
   item: BoardItemType;
   fieldDefs: FieldDef[] | null;
+  canEdit: boolean;
+  onUpdate: (item: BoardItemType) => void;
 }) {
+  const [drag, setDrag] = useState<{ from: number; target: number; active: boolean } | null>(null);
+
+  // Row-based drag reorder: pointer drag on a block, drop before the target row.
+  const handleRowPointerDown = (e: React.PointerEvent, from: number) => {
+    if (!canEdit) return;
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let active = false;
+    let target = from;
+
+    const onMove = (mv: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(mv.clientX - startX, mv.clientY - startY) < 6) return;
+        active = true;
+        setDrag({ from, target, active });
+      }
+      const els = Array.from(document.querySelectorAll<HTMLElement>('[data-mini-preview-row]'));
+      let t = els.length;
+      for (let i = 0; i < els.length; i++) {
+        const r = els[i].getBoundingClientRect();
+        if (mv.clientY < r.top - 2) { t = i; break; }
+        if (mv.clientY <= r.bottom + 2) {
+          t = mv.clientY < r.top + r.height / 2 ? i : i + 1;
+          break;
+        }
+      }
+      if (t !== target) {
+        target = t;
+        setDrag({ from, target, active });
+      }
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setDrag(null);
+      if (!active || target === from) return;
+      const rows = [...layout.rows];
+      const [moved] = rows.splice(from, 1);
+      rows.splice(target > from ? target - 1 : target, 0, moved);
+      onUpdate({ ...item, previewLayout: { ...layout, rows } });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
     <div className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: 230 }}>
       <div className="flex items-center gap-1 bg-[#2C2824] px-2 py-1">
@@ -784,18 +836,34 @@ function CardPreviewMini({ layout, item, fieldDefs }: {
             No preview fields — check some below
           </div>
         ) : layout.rows.map((slot, i) => (
-          <MiniFieldBlock key={`${slot.fieldId}-${i}`} slot={slot} item={item} fieldDefs={fieldDefs} columns={layout.columns} />
+          <MiniFieldBlock
+            key={`${slot.fieldId}-${i}`}
+            slot={slot}
+            item={item}
+            fieldDefs={fieldDefs}
+            columns={layout.columns}
+            index={i}
+            rowCount={layout.rows.length}
+            canEdit={canEdit}
+            drag={drag}
+            onPointerDown={canEdit ? (e) => handleRowPointerDown(e, i) : undefined}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
+function MiniFieldBlock({ slot, item, fieldDefs, columns, index, rowCount, canEdit, drag, onPointerDown }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   fieldDefs: FieldDef[] | null;
   columns: PreviewLayout['columns'];
+  index: number;
+  rowCount: number;
+  canEdit: boolean;
+  drag: { from: number; target: number; active: boolean } | null;
+  onPointerDown?: (e: React.PointerEvent) => void;
 }) {
   const fieldType = classifyPreviewField(slot.fieldId, item.type, fieldDefs);
   const mode = resolveFieldMode(slot, fieldType, columns);
@@ -803,20 +871,35 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
   const spanStyle = columns === 1 ? undefined : { gridColumn: `span ${span}` };
   const hasContent = hasPreviewContent(item, slot, fieldType, fieldDefs);
 
+  const isDragging = drag?.active && drag.from === index;
+  const isDropTarget = drag?.active && drag.target === index;
+  const isDropEnd = drag?.active && drag.target === rowCount && index === rowCount - 1;
+  const rootClass = [
+    'min-h-0',
+    canEdit ? 'cursor-grab touch-none' : '',
+    isDragging ? 'opacity-40 cursor-grabbing' : '',
+    isDropTarget || isDropEnd ? 'ring-1 ring-inset ring-[#B58D3D] bg-[#B58D3D]/10 rounded' : '',
+  ].filter(Boolean).join(' ');
+  const rootProps = {
+    'data-mini-preview-row': true,
+    style: spanStyle,
+    onPointerDown,
+  } as const;
+
   if (!hasContent) {
     return (
-      <div style={spanStyle} className="min-h-0">
-        <div className="flex items-center justify-center rounded border border-dashed border-[#D9D0C1] h-5 text-[7px] italic text-[#8C7B6E]/70">
-          empty
-        </div>
+    <div {...rootProps} className={rootClass}>
+      <div className="flex items-center justify-center rounded border border-dashed border-[#D9D0C1] h-5 text-[7px] italic text-[#8C7B6E]/70">
+        empty
       </div>
+    </div>
     );
   }
 
   if (fieldType === 'image') {
     const isThumb = mode === 'thumb';
     return (
-      <div style={spanStyle} className="min-h-0">
+      <div {...rootProps} className={rootClass}>
         <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-5' : 'h-9'}`}>
           <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
         </div>
@@ -826,7 +909,7 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
 
   const clamp = mode === 'expanded' ? 4 : Math.min(slot.clampLines ?? 2, 4);
   return (
-    <div style={spanStyle} className="min-h-0">
+    <div {...rootProps} className={rootClass}>
       <div className="flex flex-col justify-center gap-0.5 rounded border border-[#F0EDE6] bg-[#FAFAF8] px-1 py-1 min-h-[14px]">
         {Array.from({ length: clamp }).map((_, i) => (
           <div key={i} className="h-[3px] rounded bg-[#8C7B6E]/30" style={{ width: `${85 - (i % 3) * 15}%` }} />
