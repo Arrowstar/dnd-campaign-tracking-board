@@ -626,15 +626,27 @@ export default function Board({ boardId }: { boardId: string }) {
   };
 
   const handleUpdateItem = useCallback((updatedItem: BoardItemType) => {
-    // Permission guard: only the owner or DM may mutate an item.
     const existing = items.find(i => i.id === updatedItem.id);
-    if (existing && user && user.role !== 'dm' && existing.ownerId !== user.id) return;
 
-    const newItems = items.map(i => i.id === updatedItem.id ? updatedItem : i);
+    // Permission guard: only the owner or DM may edit an item's own
+    // content/position/etc. Everyone should still be able to comment on
+    // an item that's visible to them, even if they don't own it — so
+    // for non-owners we don't reject the update outright, we down-scope
+    // it to just the comments field and discard anything else they may
+    // have tried to change.
+    let itemToApply = updatedItem;
+    if (existing && user && user.role !== 'dm' && existing.ownerId !== user.id) {
+      const isVisibleToUser =
+        existing.visibility !== 'dm' && existing.visibility !== 'owner';
+      if (!isVisibleToUser) return;
+      itemToApply = { ...existing, comments: updatedItem.comments };
+    }
+
+    const newItems = items.map(i => i.id === itemToApply.id ? itemToApply : i);
     const currentAnns = activeTab.annotations || [];
     let annChanged = false;
     const newAnns = currentAnns.map(ann => {
-      if (!ann.pins || !ann.pins.some(p => p?.itemId === updatedItem.id)) return ann;
+      if (!ann.pins || !ann.pins.some(p => p?.itemId === itemToApply.id)) return ann;
       annChanged = true;
       const geom = getResolvedControlPoints(ann, newItems, dragOffsets, itemDimensions);
       return {
