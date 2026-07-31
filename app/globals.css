@@ -155,3 +155,46 @@ body {
   background: rgba(181, 141, 61, 0.15);
 }
 
+/* Line-clamped card preview (flattened rich text) */
+.rich-text-preview {
+  word-break: break-word;
+}
+
+.rich-text-preview .rt-preview-bullet {
+  color: #B58D3D;
+}
+
+.rich-text-preview .rt-preview-quote {
+  border-left: 2px solid #B58D3D;
+  padding-left: 0.375rem;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.rich-text-preview .rt-preview-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  white-space: pre-wrap;
+}
+
+.rich-text-preview mark {
+  background-color: #FFE58F;
+  border-radius: 0.125rem;
+}
+
+.rich-text-preview a {
+  text-decoration: underline;
+  color: #2563EB;
+}
+
+.rich-text-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(181, 141, 61, 0.15);
+  padding: 0 0.25em;
+  border-radius: 0.25rem;
+}
+

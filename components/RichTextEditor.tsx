@@ -120,6 +120,16 @@ function ToolbarButton({ onClick, active = false, title, icon }: {
 
 const divider = <div className="w-[1px] h-3.5 bg-black/15 mx-0.5" />;
 
+function getEditorAttributes(isLight: boolean, compact: boolean) {
+  return {
+    class: `tiptap rich-text-content flex-1 p-2 outline-none overflow-y-auto cursor-text text-xs leading-relaxed transition-all ${
+      compact ? 'min-h-[60px] max-h-[140px]' : 'min-h-[100px]'
+    }`,
+    style: `color: ${isLight ? '#1F2937' : '#2C2824'}`,
+    'data-interactive': 'true',
+  };
+}
+
 export function RichTextEditor({
   value,
   onChange,
@@ -157,13 +167,7 @@ export function RichTextEditor({
       TableCell,
     ],
     editorProps: {
-      attributes: {
-        class: `tiptap rich-text-content flex-1 p-2 outline-none overflow-y-auto cursor-text text-xs leading-relaxed transition-all ${
-          compact ? 'min-h-[60px] max-h-[140px]' : 'min-h-[100px]'
-        }`,
-        style: `color: ${isLight ? '#1F2937' : '#2C2824'}`,
-        'data-interactive': 'true',
-      },
+      attributes: getEditorAttributes(isLight, compact),
     },
     onUpdate: ({ editor }) => {
       if (skipNextUpdate.current) {
@@ -197,9 +201,9 @@ export function RichTextEditor({
 
   useEffect(() => {
     if (editor) {
-      editor.view.dom.style.color = isLight ? '#1F2937' : '#2C2824';
+      editor.setOptions({ editorProps: { attributes: getEditorAttributes(isLight, compact) } });
     }
-  }, [isLight, editor]);
+  }, [isLight, compact, editor]);
 
   type Chain = ReturnType<NonNullable<typeof editor>['chain']>;
 
@@ -592,4 +596,71 @@ export function RichTextDisplay({ content, className = '' }: { content: string; 
       dangerouslySetInnerHTML={{ __html: formattedHtml }}
     />
   );
+}
+
+/**
+ * Flatten editor HTML into a compact inline-HTML string suitable for
+ * line-clamped card previews. Inline formatting (bold, italic, underline,
+ * colors, font sizes, highlights, links) is preserved, block boundaries
+ * become <br />, and lists/tables collapse into readable text. Images are
+ * dropped (cards show them via dedicated image fields).
+ */
+export function flattenRichTextForPreview(html: string): string {
+  if (!html) return '';
+
+  let s = html;
+  // Drop scripts/styles and images entirely.
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<img[^>]*>/gi, '');
+  // Normalize <br> variants.
+  s = s.replace(/<br\s*\/?>/gi, '\u0000'); // sentinel: survives trimming, replaced below
+  // Block boundaries → line breaks (inline content inside is kept).
+  s = s.replace(/<(h[1-6])[^>]*>/gi, '<strong>');
+  s = s.replace(/<\/(h[1-6])>/gi, '</strong>\u0000');
+  s = s.replace(/<blockquote[^>]*>/gi, '<span class="rt-preview-quote">');
+  s = s.replace(/<\/blockquote>/gi, '</span>\u0000');
+  s = s.replace(/<pre[^>]*>/gi, '<span class="rt-preview-pre">');
+  s = s.replace(/<\/pre>/gi, '</span>\u0000');
+  s = s.replace(/<hr[^>]*\/?>/gi, '\u0000');
+  s = s.replace(/<div[^>]*>/gi, '\u0000').replace(/<\/div>/gi, '');
+  s = s.replace(/<p[^>]*>/gi, '').replace(/<\/p>/gi, '\u0000');
+  s = s.replace(/<(address|section|article|aside|header|footer|figure|figcaption|details|summary|fieldset|form)[^>]*>/gi, '\u0000');
+  s = s.replace(/<\/(address|section|article|aside|header|footer|figure|figcaption|details|summary|fieldset|form)>/gi, '');
+
+  // Lists: numbered items get 1./2./…, bullets get •; each item ends a line.
+  // Done in a single pass so list-state tracking stays consistent.
+  let olDepth = 0;
+  let liCount = 0;
+  s = s.replace(/<(ol|ul|li|\/ol|\/ul|\/li)[^>]*>/gi, (match, tag) => {
+    const t = tag.toLowerCase();
+    if (t === 'ol') { olDepth += 1; liCount = 0; return ''; }
+    if (t === 'ul') { liCount = 0; return ''; }
+    if (t === '/ol') { olDepth = Math.max(0, olDepth - 1); return ''; }
+    if (t === '/ul') return '';
+    if (t === '/li') return '\u0000';
+    liCount += 1;
+    if (olDepth > 0) return `${liCount}. `;
+    return '<span class="rt-preview-bullet">\u2022</span> ';
+  });
+
+  // Tables: rows on separate lines, cells joined with |.
+  s = s.replace(/<table[^>]*>/gi, '').replace(/<\/table>/gi, '');
+  s = s.replace(/<thead[^>]*>|<\/thead>|<tbody[^>]*>|<\/tbody>|<tfoot[^>]*>|<\/tfoot>/gi, '');
+  s = s.replace(/<tr[^>]*>/gi, '').replace(/<\/tr>/gi, '\u0000');
+  s = s.replace(/<t[dh][^>]*>/gi, '').replace(/<\/t[dh]>/gi, ' | ');
+
+  // Drop any leftover unknown block tags by unwrapping them.
+  s = s.replace(/<\/(p|div|ul|ol|li|h[1-6]|blockquote|pre|tr|td|th|table)>/gi, '');
+  s = s.replace(/<(p|div|ul|ol|li|h[1-6]|blockquote|pre|tr|td|th|table)[^>]*>/gi, '');
+
+  // Restore line breaks: trim stray separators, collapse runs, drop blank lines.
+  s = s.replace(/[ |\u0000]+(?=\u0000)/g, '\u0000');
+  s = s.replace(/\u0000[ |]+/g, '\u0000');
+  s = s.replace(/\u0000+/g, '\u0000');
+  const parts = s.split('\u0000').map(p => p.trim());
+  const joined = parts.filter((p, i) => p !== '' || (i > 0 && parts[i - 1] !== '')).join('\u0000');
+  s = joined.replace(/\u0000/g, '<br />');
+
+  return s.replace(/(<br \/>)+$/g, '').trim();
 }
