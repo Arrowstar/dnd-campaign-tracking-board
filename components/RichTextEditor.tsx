@@ -750,30 +750,33 @@ export function flattenRichTextForPreview(html: string): string {
     return '<span class="rt-preview-bullet">\u2022</span> ';
   });
 
-  // Tables: rows on separate lines, cells joined with |. Cell content is
-  // collapsed to a single line — TipTap wraps cell content in <p>, which
-  // would otherwise put a line break before every cell separator.
+  // Tables: rebuild as real <table> markup so previews render an actual
+  // table instead of text columns. Cell content is collapsed to a single
+  // line — TipTap wraps cell content in <p>, which would otherwise put a
+  // line break before every cell.
   s = s.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (tableHtml) => {
     const rows = tableHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) ?? [];
-    const lines: string[] = [];
-    for (const row of rows) {
+    const htmlRows = rows.map(row => {
       const cells = row.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? [];
-      const texts = cells.map(cell =>
-        cell
+      const inner = cells.map(cell => {
+        const cellTag = /^<th[\s>]/i.test(cell) ? 'th' : 'td';
+        const text = cell
           .replace(/^<t[dh][^>]*>/i, '')
           .replace(/<\/t[dh]>$/i, '')
           .replace(/\u0000+/g, ' ')
           .replace(/\s+/g, ' ')
-          .trim()
-      );
-      lines.push(texts.join(' | '));
-    }
-    return lines.join('\u0000') + (lines.length ? '\u0000' : '');
+          .trim();
+        return `<${cellTag}>${text}</${cellTag}>`;
+      });
+      return `<tr>${inner.join('')}</tr>`;
+    });
+    return `<table class="rt-preview-table">${htmlRows.join('')}</table>`;
   });
 
-  // Drop any leftover unknown block tags by unwrapping them.
-  s = s.replace(/<\/(pre|p|div|ul|ol|li|h[1-6]|blockquote|tr|td|th|table)>/gi, '');
-  s = s.replace(/<(pre|p|div|ul|ol|li|h[1-6]|blockquote|tr|td|th|table)[^>]*>/gi, '');
+  // Drop any leftover unknown block tags by unwrapping them. (Table tags are
+  // kept: they were rebuilt as structured markup in the table pass above.)
+  s = s.replace(/<\/(pre|p|div|ul|ol|li|h[1-6]|blockquote)>/gi, '');
+  s = s.replace(/<(pre|p|div|ul|ol|li|h[1-6]|blockquote)[^>]*>/gi, '');
 
   // Restore line breaks: trim stray separators, collapse runs, drop blank lines.
   s = s.replace(/[ |\u0000]+(?=\u0000)/g, '\u0000');

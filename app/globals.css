@@ -177,7 +177,28 @@ body {
   background: rgba(0, 0, 0, 0.06);
   border-radius: 0.25rem;
   padding: 0 0.25rem;
-  white-space: pre-wrap;
+}
+
+.rich-text-preview .rt-preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.2rem 0;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.rich-text-preview .rt-preview-table th,
+.rich-text-preview .rt-preview-table td {
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  padding: 0.15rem 0.35rem;
+  vertical-align: top;
+  text-align: left;
+  min-width: 2.5rem;
+}
+
+.rich-text-preview .rt-preview-table th {
+  background: #EBE4D8;
+  font-weight: 700;
 }
 
 .rich-text-preview mark {
