@@ -43,6 +43,26 @@ export type ItemField = {
   visibility?: Visibility;
 };
 
+export type PreviewFieldMode = 'auto' | 'hero' | 'thumb' | 'compact' | 'expanded';
+
+export type PreviewFieldSlot = {
+  /** FieldDef id (or '__image_content__' sentinel for image-type items). */
+  fieldId: string;
+  /** Grid columns occupied when the card preview uses 2 columns (1 = half width, 2 = full row). */
+  span?: 1 | 2;
+  /** How the field renders in the card preview. 'auto' picks a sensible default per field type. */
+  mode?: PreviewFieldMode;
+  /** Line clamp for rich text previews. Ignored when mode is 'expanded'. */
+  clampLines?: 2 | 4 | 8;
+};
+
+export type PreviewLayout = {
+  /** Number of columns in the card preview grid. */
+  columns: 1 | 2;
+  /** Ordered list of preview slots. */
+  rows: PreviewFieldSlot[];
+};
+
 export type BoardItem = {
   id: string;
   type: ItemType;
@@ -68,6 +88,10 @@ export type BoardItem = {
   // Field IDs (FieldDef ids) to show in the compact board card preview.
   // When undefined, a sensible per-type default is used.
   previewFields?: string[];
+  // Fine-grained card preview layout (columns + ordered slots with per-field
+  // width/display-mode controls). When undefined, it is derived from
+  // previewFields (or per-type defaults) for backwards compatibility.
+  previewLayout?: PreviewLayout;
 };
 
 export type DrawingLine = {

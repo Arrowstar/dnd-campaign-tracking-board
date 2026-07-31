@@ -4,13 +4,24 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X, ChevronRight, Settings, Trash2, MessageSquare, Globe, Eye, Lock,
-  User as UserIcon, Send, Edit3, Check, LayoutGrid, GripVertical,
+  User as UserIcon, Send, Edit3, Check, GripVertical,
   Upload, Link as LinkIcon, Image as ImageIcon,
+  ChevronUp, ChevronDown, SlidersHorizontal,
 } from 'lucide-react';
-import { BoardItem as BoardItemType, User } from '@/lib/types';
+import { BoardItem as BoardItemType, User, PreviewFieldSlot, PreviewFieldMode, PreviewLayout } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import NpcBoardItemFields from './NpcBoardItemFields';
-import StructuredBoardItemFields, { FieldDef } from './StructuredBoardItemFields';
+import StructuredBoardItemFields, { FieldDef, parseStructured } from './StructuredBoardItemFields';
+import {
+  resolvePreviewLayout,
+  togglePreviewFieldInLayout,
+  movePreviewFieldInLayout,
+  updatePreviewSlot,
+  setPreviewColumns,
+  classifyPreviewField,
+  resolveFieldMode,
+  resolveFieldSpan,
+} from './previewLayout';
 import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
@@ -139,21 +150,30 @@ export default function FocusDrawer({
     setIsWritingComment(false);
   };
 
-  // ── Preview field selector ─────────────────────────────────────────────────
+  // ── Preview layout handlers ────────────────────────────────────────────────
   const togglePreviewField = (fieldId: string) => {
     if (!item || !canEdit) return;
-    const current = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
-    const next = current.includes(fieldId)
-      ? current.filter(f => f !== fieldId)
-      : [...current, fieldId];
-    onUpdate({ ...item, previewFields: next });
+    onUpdate({ ...item, previewLayout: togglePreviewFieldInLayout(resolvePreviewLayout(item, item.type, fieldDefs), fieldId) });
   };
 
-  const effectivePreviewFields = item
-    ? (item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs))
-    : [];
+  const movePreviewField = (fieldId: string, direction: -1 | 1) => {
+    if (!item || !canEdit) return;
+    onUpdate({ ...item, previewLayout: movePreviewFieldInLayout(resolvePreviewLayout(item, item.type, fieldDefs), fieldId, direction) });
+  };
+
+  const patchPreviewSlot = (fieldId: string, patch: Partial<PreviewFieldSlot>) => {
+    if (!item || !canEdit) return;
+    onUpdate({ ...item, previewLayout: updatePreviewSlot(resolvePreviewLayout(item, item.type, fieldDefs), fieldId, patch) });
+  };
+
+  const changePreviewColumns = (columns: 1 | 2) => {
+    if (!item || !canEdit) return;
+    onUpdate({ ...item, previewLayout: setPreviewColumns(resolvePreviewLayout(item, item.type, fieldDefs), columns) });
+  };
 
   if (!item) return null;
+
+  const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
 
   return (
     <AnimatePresence>
@@ -444,51 +464,55 @@ export default function FocusDrawer({
             <div className="p-4 flex flex-col gap-4">
               <div>
                 <h3 className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] mb-1">
-                  Board Card Preview Fields
+                  Board Card Preview
                 </h3>
                 <p className="text-xs text-[#8C7B6E] leading-relaxed">
-                  Choose which fields appear directly on the board card. Everything else is accessible here in this panel.
+                  Choose which fields appear directly on the board card and how they are laid out. Everything else stays in this panel.
                 </p>
               </div>
 
+              {/* Columns + live mini preview */}
+              <div className="flex items-start gap-4">
+                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Columns</span>
+                  <Segmented
+                    value={previewLayout.columns}
+                    options={[
+                      { value: 1, label: '1', title: 'Single column (stacked)' },
+                      { value: 2, label: '2', title: 'Two columns — short fields flow side by side' },
+                    ]}
+                    onChange={changePreviewColumns}
+                  />
+                  <p className="text-[10px] text-[#8C7B6E] leading-snug max-w-[140px]">
+                    Two columns let short fields flow side by side.
+                  </p>
+                </div>
+                <CardPreviewMini layout={previewLayout} item={item} fieldDefs={fieldDefs} />
+              </div>
+
               {item.type === 'npc' ? (
-                <NpcPreviewFieldSelector item={item} onToggle={togglePreviewField} effectiveFields={effectivePreviewFields} />
+                <NpcPreviewFieldSelector
+                  item={item}
+                  layout={previewLayout}
+                  onToggle={togglePreviewField}
+                  onMove={movePreviewField}
+                  onPatch={patchPreviewSlot}
+                />
               ) : fieldDefs ? (
                 <div className="flex flex-col gap-2">
-                  {fieldDefs.map(def => {
-                    const isOn = effectivePreviewFields.includes(def.id);
-                    const fieldVis = item.fields?.find(f => f.id === def.id)?.visibility;
-                    return (
-                      <label
-                        key={def.id}
-                        className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all select-none ${
-                          isOn
-                            ? 'bg-[#B58D3D]/10 border-[#B58D3D]/60 text-[#2C2824]'
-                            : 'bg-white border-[#D9D0C1] text-[#8C7B6E] hover:border-[#B58D3D]/40'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isOn}
-                          onChange={() => togglePreviewField(def.id)}
-                          className="w-4 h-4 accent-[#B58D3D]"
-                        />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold flex items-center gap-1.5">
-                            {def.label}
-                            {fieldVis === 'dm' && (
-                              <span title="DM only field"><Eye size={11} className="text-purple-500" /></span>
-                            )}
-                            {fieldVis === 'owner' && (
-                              <span title="Owner only field"><Lock size={11} className="text-amber-500" /></span>
-                            )}
-                          </span>
-                          <span className="text-[10px] opacity-70 capitalize">{def.type} field</span>
-                        </div>
-                        {isOn && <LayoutGrid size={13} className="ml-auto text-[#B58D3D]" />}
-                      </label>
-                    );
-                  })}
+                  {fieldDefs.map(def => (
+                    <PreviewFieldRow
+                      key={def.id}
+                      id={def.id}
+                      label={def.label}
+                      fieldType={def.type === 'image' ? 'image' : def.type === 'structured' ? 'structured' : 'text'}
+                      fieldVis={item.fields?.find(f => f.id === def.id)?.visibility}
+                      layout={previewLayout}
+                      onToggle={togglePreviewField}
+                      onMove={movePreviewField}
+                      onPatch={patchPreviewSlot}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="text-xs text-[#8C7B6E] italic">
@@ -497,7 +521,7 @@ export default function FocusDrawer({
               )}
 
               <div className="pt-3 border-t border-[#D9D0C1] text-[10px] text-[#8C7B6E]">
-                <span className="font-bold text-[#B58D3D]">Tip:</span> Image fields show as a thumbnail on the card. Structured fields show as compact key-value lines.
+                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields. Open the sliders on a field to switch between half/full width, hero banners vs thumbnails, and line clamps for long text.
               </div>
             </div>
           )}
@@ -508,84 +532,289 @@ export default function FocusDrawer({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NPC preview field selector
+// Preview layout UI — segmented control, field row, live mini preview
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NPC_PREVIEW_FIELD_OPTIONS = [
-  { id: 'npc-image', label: 'Character Portrait', type: 'image' },
-  { id: 'npc-personality-traits', label: 'Personality & Traits', type: 'structured' },
-  { id: 'npc-location', label: 'Where Met / Location', type: 'text' },
-  { id: 'npc-history', label: 'History of Interactions', type: 'text' },
-  { id: 'npc-other', label: 'Other Notes', type: 'text' },
-];
-
-function NpcPreviewFieldSelector({
-  item, onToggle, effectiveFields,
-}: {
-  item: BoardItemType;
-  onToggle: (id: string) => void;
-  effectiveFields: string[];
+function Segmented<T extends string | number>({ value, options, onChange }: {
+  value: T;
+  options: { value: T; label: string; title?: string }[];
+  onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      {NPC_PREVIEW_FIELD_OPTIONS.map(def => {
-        const isOn = effectiveFields.includes(def.id);
-        const fieldVis = item.fields?.find(f => f.id === def.id)?.visibility;
-        return (
-          <label
-            key={def.id}
-            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all select-none ${
-              isOn
-                ? 'bg-[#B58D3D]/10 border-[#B58D3D]/60 text-[#2C2824]'
-                : 'bg-white border-[#D9D0C1] text-[#8C7B6E] hover:border-[#B58D3D]/40'
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={isOn}
-              onChange={() => onToggle(def.id)}
-              className="w-4 h-4 accent-[#B58D3D]"
-            />
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold flex items-center gap-1.5">
-                {def.label}
-                {fieldVis === 'dm' && (
-                  <span title="DM only field"><Eye size={11} className="text-purple-500" /></span>
-                )}
-                {fieldVis === 'owner' && (
-                  <span title="Owner only field"><Lock size={11} className="text-amber-500" /></span>
-                )}
-              </span>
-              <span className="text-[10px] opacity-70 capitalize">{def.type} field</span>
-            </div>
-            {isOn && <LayoutGrid size={13} className="ml-auto text-[#B58D3D]" />}
-          </label>
-        );
-      })}
+    <div className="flex rounded-md border border-[#D9D0C1] overflow-hidden bg-white flex-shrink-0">
+      {options.map(opt => (
+        <button
+          key={String(opt.value)}
+          type="button"
+          title={opt.title}
+          onClick={() => onChange(opt.value)}
+          className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${
+            value === opt.value ? 'bg-[#B58D3D] text-white' : 'text-[#8C7B6E] hover:bg-[#F5F2ED]'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Default preview fields per item type
-// ─────────────────────────────────────────────────────────────────────────────
+const STYLE_OPTIONS: Record<'image' | 'text' | 'structured', { value: PreviewFieldMode; label: string; title: string }[]> = {
+  image: [
+    { value: 'auto', label: 'Auto', title: 'Full-width banner when full width, thumbnail when half' },
+    { value: 'hero', label: 'Hero', title: 'Full-width banner image' },
+    { value: 'thumb', label: 'Thumb', title: 'Small square thumbnail that flows inline' },
+  ],
+  text: [
+    { value: 'auto', label: 'Auto', title: 'Compact two-line preview' },
+    { value: 'compact', label: 'Compact', title: 'Short preview with a line clamp' },
+    { value: 'expanded', label: 'Expanded', title: 'Show as much of the text as fits' },
+  ],
+  structured: [
+    { value: 'auto', label: 'Auto', title: 'Compact key-value preview' },
+    { value: 'compact', label: 'Compact', title: 'Show the first few key-value entries' },
+    { value: 'expanded', label: 'Expanded', title: 'Show every entry' },
+  ],
+};
 
-export function getDefaultPreviewFields(type: string, fieldDefs: FieldDef[] | null): string[] {
-  const defaults: Record<string, string[]> = {
-    character: ['char-portrait'],
-    npc: ['npc-image'],            // actual ID from getDefaultNpcFields
-    faction: ['faction-emblem'],
-    location: ['loc-map'],
-    quest: ['quest-info'],
-    session: ['sess-info'],
-    event: ['event-details'],
-    loot: ['loot-image'],
-    note: ['note-content'],
-    rule: ['rule-info'],
-    downtime: ['dt-details'],
-    image: ['__image_content__'],  // special sentinel: renders item.content as image
-  };
-  return defaults[type] ?? (fieldDefs ? [fieldDefs[0]?.id].filter(Boolean) as string[] : []);
+function PreviewFieldRow({ id, label, fieldType, fieldVis, layout, onToggle, onMove, onPatch }: {
+  id: string;
+  label: string;
+  fieldType: 'image' | 'text' | 'structured';
+  fieldVis?: 'all' | 'dm' | 'owner';
+  layout: PreviewLayout;
+  onToggle: (id: string) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onPatch: (id: string, patch: Partial<PreviewFieldSlot>) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const slot = layout.rows.find(r => r.fieldId === id);
+  const isOn = !!slot;
+  const idx = slot ? layout.rows.findIndex(r => r.fieldId === id) : -1;
+  const isFirst = idx === 0;
+  const isLast = idx === layout.rows.length - 1;
+  const effectiveMode = slot ? resolveFieldMode(slot, fieldType, layout.columns) : 'compact';
+
+  return (
+    <div className={`rounded-lg border transition-all ${isOn ? 'bg-[#B58D3D]/10 border-[#B58D3D]/60' : 'bg-white border-[#D9D0C1]'}`}>
+      <div className="flex items-center gap-2.5 p-3">
+        <input
+          type="checkbox"
+          checked={isOn}
+          onChange={() => onToggle(id)}
+          className="w-4 h-4 accent-[#B58D3D] cursor-pointer flex-shrink-0"
+        />
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="text-xs font-bold flex items-center gap-1.5">
+            {label}
+            {fieldVis === 'dm' && (
+              <span title="DM only field"><Eye size={11} className="text-purple-500" /></span>
+            )}
+            {fieldVis === 'owner' && (
+              <span title="Owner only field"><Lock size={11} className="text-amber-500" /></span>
+            )}
+          </span>
+          <span className="text-[10px] opacity-70 capitalize">{fieldType} field</span>
+        </div>
+        {isOn && (
+          <div
+            className="flex items-center gap-0.5 flex-shrink-0"
+            onPointerDown={e => e.stopPropagation()}
+            onPointerDownCapture={e => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => onMove(id, -1)}
+              disabled={isFirst}
+              className="p-1 rounded hover:bg-[#B58D3D]/15 text-[#8C7B6E] hover:text-[#8C621E] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+              title="Move up"
+            >
+              <ChevronUp size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove(id, 1)}
+              disabled={isLast}
+              className="p-1 rounded hover:bg-[#B58D3D]/15 text-[#8C7B6E] hover:text-[#8C621E] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+              title="Move down"
+            >
+              <ChevronDown size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              className={`p-1 rounded transition-colors cursor-pointer ${expanded ? 'bg-[#B58D3D]/20 text-[#8C621E]' : 'text-[#8C7B6E] hover:bg-[#B58D3D]/15 hover:text-[#8C621E]'}`}
+              title="Layout options"
+            >
+              <SlidersHorizontal size={13} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isOn && expanded && (
+        <div className="px-3 pb-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Width</span>
+            <Segmented
+              value={(slot?.span ?? 1) as 1 | 2}
+              options={[
+                { value: 1 as const, label: 'Half', title: 'Occupies one column' },
+                { value: 2 as const, label: 'Full', title: 'Spans the full card width' },
+              ]}
+              onChange={v => onPatch(id, { span: v })}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Style</span>
+            <Segmented
+              value={slot?.mode ?? 'auto'}
+              options={STYLE_OPTIONS[fieldType]}
+              onChange={v => onPatch(id, { mode: v })}
+            />
+          </div>
+          {fieldType === 'text' && effectiveMode !== 'expanded' && (
+            <div className="flex items-center gap-2">
+              <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Lines</span>
+              <Segmented
+                value={(slot?.clampLines ?? 2) as 2 | 4 | 8}
+                options={[
+                  { value: 2 as const, label: '2', title: 'Two lines' },
+                  { value: 4 as const, label: '4', title: 'Four lines' },
+                  { value: 8 as const, label: '8', title: 'Eight lines' },
+                ]}
+                onChange={v => onPatch(id, { clampLines: v })}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const NPC_PREVIEW_FIELD_OPTIONS = [
+  { id: 'npc-image', label: 'Character Portrait', type: 'image' as const },
+  { id: 'npc-personality-traits', label: 'Personality & Traits', type: 'structured' as const },
+  { id: 'npc-location', label: 'Where Met / Location', type: 'text' as const },
+  { id: 'npc-history', label: 'History of Interactions', type: 'text' as const },
+  { id: 'npc-other', label: 'Other Notes', type: 'text' as const },
+];
+
+function NpcPreviewFieldSelector({ item, layout, onToggle, onMove, onPatch }: {
+  item: BoardItemType;
+  layout: PreviewLayout;
+  onToggle: (id: string) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onPatch: (id: string, patch: Partial<PreviewFieldSlot>) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {NPC_PREVIEW_FIELD_OPTIONS.map(def => (
+        <PreviewFieldRow
+          key={def.id}
+          id={def.id}
+          label={def.label}
+          fieldType={def.type}
+          fieldVis={item.fields?.find(f => f.id === def.id)?.visibility}
+          layout={layout}
+          onToggle={onToggle}
+          onMove={onMove}
+          onPatch={onPatch}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Whether a slot currently has content worth rendering on the card. */
+function hasPreviewContent(item: BoardItemType, slot: PreviewFieldSlot, fieldType: 'image' | 'text' | 'structured', fieldDefs: FieldDef[] | null): boolean {
+  if (item.type === 'image' && slot.fieldId === '__image_content__') return !!item.content;
+  const field = item.fields?.find(f => f.id === slot.fieldId);
+  if (!field) return false;
+  if (fieldType === 'image') return !!field.imageUrl;
+  if (fieldType === 'structured') {
+    if (item.type === 'npc' && slot.fieldId === 'npc-personality-traits') {
+      try {
+        return Object.values(JSON.parse(field.textValue || '{}') as Record<string, string>).some(v => !!v);
+      } catch {
+        return false;
+      }
+    }
+    const def = fieldDefs?.find(d => d.id === slot.fieldId);
+    const data = parseStructured(field.textValue);
+    return def?.structuredKeys?.some(k => !!data[k.key]) ?? false;
+  }
+  return !!field.textValue && field.textValue.replace(/<[^>]*>/g, '').trim().length > 0;
+}
+
+function CardPreviewMini({ layout, item, fieldDefs }: {
+  layout: PreviewLayout;
+  item: BoardItemType;
+  fieldDefs: FieldDef[] | null;
+}) {
+  return (
+    <div className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: 230 }}>
+      <div className="flex items-center gap-1 bg-[#2C2824] px-2 py-1">
+        <span className="text-[8px] font-bold font-serif italic text-white truncate flex-1 min-w-0">{item.title || 'Untitled'}</span>
+        <span className="text-[6px] font-bold uppercase tracking-wider text-white/90 bg-white/20 rounded px-1 py-px flex-shrink-0">{item.type}</span>
+      </div>
+      <div className="grid gap-1 p-1.5" style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }}>
+        {layout.rows.length === 0 ? (
+          <div className="text-[8px] italic text-[#8C7B6E] text-center py-2 col-span-full">
+            No preview fields — check some below
+          </div>
+        ) : layout.rows.map((slot, i) => (
+          <MiniFieldBlock key={`${slot.fieldId}-${i}`} slot={slot} item={item} fieldDefs={fieldDefs} columns={layout.columns} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
+  slot: PreviewFieldSlot;
+  item: BoardItemType;
+  fieldDefs: FieldDef[] | null;
+  columns: 1 | 2;
+}) {
+  const fieldType = classifyPreviewField(slot.fieldId, item.type, fieldDefs);
+  const mode = resolveFieldMode(slot, fieldType, columns);
+  const span = resolveFieldSpan(slot, fieldType, columns, mode);
+  const spanStyle = columns === 2 && span === 2 ? { gridColumn: 'span 2' } : undefined;
+  const hasContent = hasPreviewContent(item, slot, fieldType, fieldDefs);
+
+  if (!hasContent) {
+    return (
+      <div style={spanStyle} className="min-h-0">
+        <div className="flex items-center justify-center rounded border border-dashed border-[#D9D0C1] h-5 text-[7px] italic text-[#8C7B6E]/70">
+          empty
+        </div>
+      </div>
+    );
+  }
+
+  if (fieldType === 'image') {
+    const isThumb = mode === 'thumb';
+    return (
+      <div style={spanStyle} className="min-h-0">
+        <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-5 w-5' : 'h-9'}`}>
+          <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
+        </div>
+      </div>
+    );
+  }
+
+  const clamp = mode === 'expanded' ? 4 : Math.min(slot.clampLines ?? 2, 4);
+  return (
+    <div style={spanStyle} className="min-h-0">
+      <div className="flex flex-col justify-center gap-0.5 rounded border border-[#F0EDE6] bg-[#FAFAF8] px-1 py-1 min-h-[14px]">
+        {Array.from({ length: clamp }).map((_, i) => (
+          <div key={i} className="h-[3px] rounded bg-[#8C7B6E]/30" style={{ width: `${85 - (i % 3) * 15}%` }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

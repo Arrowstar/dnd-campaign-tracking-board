@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from 'react';
 import { motion } from 'motion/react';
-import { BoardItem as BoardItemType, User, ItemField, Visibility } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot } from '@/lib/types';
 import { canViewField } from '@/lib/fieldVisibility';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
@@ -15,7 +15,13 @@ import { uploadFileToBlob } from '@/lib/utils';
 import { RichTextDisplay } from './RichTextEditor';
 import { parseStructured, buildDefaultFields } from './StructuredBoardItemFields';
 import { FieldDef } from './StructuredBoardItemFields';
-import { getDefaultPreviewFields } from './FocusDrawer';
+import {
+  resolvePreviewLayout,
+  classifyPreviewField,
+  resolveFieldMode,
+  resolveFieldSpan,
+  resolveClampLines,
+} from './previewLayout';
 import { getPlainText } from '@/lib/crossref';
 import AnnotatedImagePreview from './AnnotatedImagePreview';
 
@@ -312,27 +318,36 @@ interface BoardItemProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Preview renderer — renders one FieldDef visually in the compact card
+// Preview renderer — renders one PreviewFieldSlot visually in the compact card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PreviewField({ fieldId, item, user, fieldDefs, resolvedFields }: {
-  fieldId: string;
+// Hero (full-width) image previews render at 140px tall; thumbnails are 72px
+// squares. (Hardcoded in the class names below — Tailwind needs static classes.)
+
+function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: {
+  slot: PreviewFieldSlot;
   item: BoardItemType;
   user: User;
   fieldDefs: FieldDef[] | null;
   /** Pre-resolved fields array (may include defaults merged in) */
   resolvedFields: ItemField[];
+  /** Number of columns in the preview grid (from the item's preview layout) */
+  columns: 1 | 2;
 }) {
+  const { fieldId } = slot;
+
   // ── image-type board items store their content in item.content ──
   if (item.type === 'image' && fieldId === '__image_content__') {
     if (!item.content) return null;
     return (
-      <AnnotatedImagePreview
-        imageUrl={item.content}
-        lines={item.lines}
-        alt="Image"
-        imgClassName="w-full h-full object-contain pointer-events-none select-none"
-      />
+      <div className="h-full min-h-0 overflow-hidden">
+        <AnnotatedImagePreview
+          imageUrl={item.content}
+          lines={item.lines}
+          alt="Image"
+          imgClassName="w-full h-full object-contain pointer-events-none select-none"
+        />
+      </div>
     );
   }
 
@@ -342,35 +357,88 @@ function PreviewField({ fieldId, item, user, fieldDefs, resolvedFields }: {
     return <HiddenFieldChip label={field.label} visibility={field.visibility} />;
   }
 
-  // ── NPC: portrait is stored in field id 'npc-image' ──
-  if (item.type === 'npc') {
-    if (fieldId === 'npc-image') {
-      const portraitField = resolvedFields.find(f => f.id === 'npc-image');
-      const imageUrl = portraitField?.imageUrl;
-      if (!imageUrl) return null;
+  const fieldType = classifyPreviewField(fieldId, item.type, fieldDefs);
+  const def = fieldDefs?.find(d => d.id === fieldId) ?? null;
+  const fieldLabel = def?.label ?? field?.label ?? fieldId;
+  const mode = resolveFieldMode(slot, fieldType, columns);
+  const span = resolveFieldSpan(slot, fieldType, columns, mode);
+  const spanStyle = columns === 2 && span === 2 ? { gridColumn: 'span 2' } : undefined;
+
+  // ── NPC: portrait ──
+  if (item.type === 'npc' && fieldId === 'npc-image') {
+    const imageUrl = field?.imageUrl;
+    if (!imageUrl) return null;
+    if (mode === 'thumb') {
       return (
-        <AnnotatedImagePreview
-          imageUrl={imageUrl}
-          lines={portraitField?.lines}
-          alt="NPC portrait"
-          imgClassName="w-full h-full object-cover object-top pointer-events-none select-none"
-        />
+        <div style={spanStyle} className="min-h-0">
+          <img
+            src={imageUrl}
+            alt="NPC portrait"
+            draggable={false}
+            className="w-[72px] h-[72px] object-cover object-top rounded pointer-events-none select-none"
+          />
+        </div>
       );
     }
+    return (
+      <div style={spanStyle} className="min-h-0">
+        <AnnotatedImagePreview
+          imageUrl={imageUrl}
+          lines={field?.lines}
+          alt="NPC portrait"
+          imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
+        />
+      </div>
+    );
+  }
+
+  // ── Image field — hero banner or small thumbnail ──
+  if (fieldType === 'image') {
+    const imageUrl = field?.imageUrl;
+    if (!imageUrl) return null;
+    if (mode === 'thumb') {
+      return (
+        <div style={spanStyle} className="min-h-0">
+          <img
+            src={imageUrl}
+            alt={fieldLabel}
+            draggable={false}
+            className="w-[72px] h-[72px] object-cover object-top rounded pointer-events-none select-none"
+          />
+        </div>
+      );
+    }
+    return (
+      <div style={spanStyle} className="min-h-0">
+        <AnnotatedImagePreview
+          imageUrl={imageUrl}
+          lines={field?.lines}
+          alt={fieldLabel}
+          imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
+        />
+      </div>
+    );
+  }
+
+  // ── Structured field — show key-value pairs ──
+  if (fieldType === 'structured') {
     // NPC personality traits (stored as JSON in npc-personality-traits field)
-    if (fieldId === 'npc-personality-traits') {
-      const f = resolvedFields.find(f => f.id === 'npc-personality-traits');
-      if (!f?.textValue) return null;
+    if (item.type === 'npc' && fieldId === 'npc-personality-traits') {
+      if (!field?.textValue) return null;
       let entries: [string, string][] = [];
       try {
-        const data = JSON.parse(f.textValue) as Record<string, string>;
-        entries = Object.entries(data).filter(([, v]) => v).slice(0, 3);
+        const data = JSON.parse(field.textValue) as Record<string, string>;
+        entries = Object.entries(data).filter(([, v]) => v);
       } catch {
         return null;
       }
+      if (mode !== 'expanded') entries = entries.slice(0, 3);
       if (entries.length === 0) return null;
       return (
-        <div className="flex flex-col gap-0.5">
+        <div
+          style={spanStyle}
+          className={`min-h-0 ${columns === 2 && span === 2 && entries.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
+        >
           {entries.map(([k, v]) => (
             <div key={k} className="flex items-baseline gap-1 text-[10px] leading-tight">
               <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={k}>{k}</span>
@@ -380,54 +448,19 @@ function PreviewField({ fieldId, item, user, fieldDefs, resolvedFields }: {
         </div>
       );
     }
-    // Any other NPC text field
-    const npcField = resolvedFields.find(f => f.id === fieldId);
-    if (npcField?.textValue) {
-      const plain = stripHtml(getPlainText(npcField.textValue));
-      if (!plain) return null;
-      return (
-        <div className="flex flex-col gap-0.5">
-          <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={npcField.label}>
-            {npcField.label}
-          </span>
-          <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">{plain}</p>
-        </div>
-      );
-    }
-    return null;
-  }
 
-  if (!fieldDefs) return null;
-  const def = fieldDefs.find(d => d.id === fieldId);
-  if (!def) return null;
-
-  // ── Image field — show thumbnail ──
-  if (def.type === 'image') {
-    const field = resolvedFields.find(f => f.id === fieldId);
-    const imageUrl = field?.imageUrl;
-    if (!imageUrl) return null;
-    return (
-      <AnnotatedImagePreview
-        imageUrl={imageUrl}
-        lines={field?.lines}
-        alt={def.label}
-        imgClassName="w-full h-full object-cover object-top pointer-events-none select-none"
-      />
-    );
-  }
-
-  // ── Structured field — show key-value pairs ──
-  if (def.type === 'structured' && def.structuredKeys) {
-    const field = resolvedFields.find(f => f.id === fieldId);
     const data = parseStructured(field?.textValue);
-    const entries = def.structuredKeys
+    const entries = (def?.structuredKeys ?? [])
       .map(sk => ({ label: sk.label, value: data[sk.key] }))
-      .filter(e => e.value)
-      .slice(0, 4);
-    if (entries.length === 0) return null;
+      .filter(e => e.value);
+    const shown = mode === 'expanded' ? entries : entries.slice(0, 4);
+    if (shown.length === 0) return null;
     return (
-      <div className="flex flex-col gap-0.5">
-        {entries.map(e => (
+      <div
+        style={spanStyle}
+        className={`min-h-0 ${columns === 2 && span === 2 && shown.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
+      >
+        {shown.map(e => (
           <div key={e.label} className="flex items-baseline gap-1 text-[10px] leading-tight">
             <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={e.label}>{e.label}</span>
             <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(e.value)}</span>
@@ -437,29 +470,34 @@ function PreviewField({ fieldId, item, user, fieldDefs, resolvedFields }: {
     );
   }
 
-  // ── Text field — show a label plus first 2 lines of plain text ──
-  if (def.type === 'text') {
-    // Always read the live value from resolvedFields — it already merges
-    // saved item.fields over the item.content-seeded default, so this
-    // works correctly both before and after the field has been edited.
-    // (Reading item.content directly here was stale once a field existed,
-    // which is why long-form/rich-text content failed to show on the canvas.)
-    const rawValue = resolvedFields.find(f => f.id === fieldId)?.textValue;
-    const plain = rawValue ? stripHtml(getPlainText(rawValue || '')) : '';
-    if (!plain) return null;
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={def.label}>
-          {def.label}
-        </span>
-        <p className="text-[10px] leading-snug text-[#423D38]/80 line-clamp-2 italic">
-          {plain}
-        </p>
-      </div>
-    );
-  }
-
-  return null;
+  // ── Text field — show a label plus clamped plain text ──
+  // Always read the live value from resolvedFields — it already merges
+  // saved item.fields over the item.content-seeded default, so this
+  // works correctly both before and after the field has been edited.
+  // (Reading item.content directly here was stale once a field existed,
+  // which is why long-form/rich-text content failed to show on the canvas.)
+  const rawValue = field?.textValue;
+  const plain = rawValue ? stripHtml(getPlainText(rawValue || '')) : '';
+  if (!plain) return null;
+  const clamp = resolveClampLines(slot, mode);
+  return (
+    <div style={spanStyle} className="flex flex-col gap-0.5 min-h-0">
+      <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={fieldLabel}>
+        {fieldLabel}
+      </span>
+      <p
+        className="text-[10px] leading-snug text-[#423D38]/80 italic min-h-0"
+        style={clamp ? {
+          display: '-webkit-box',
+          WebkitLineClamp: clamp,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        } : undefined}
+      >
+        {plain}
+      </p>
+    </div>
+  );
 }
 
 function HiddenFieldChip({ label, visibility }: { label: string; visibility: Visibility }) {
@@ -655,7 +693,7 @@ export default memo(function BoardItem({
   const titleFontSize = Math.min(16, Math.max(10, 13 / safeZoomScale));
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
-  const previewFieldIds = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
+  const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
 
   // Merge saved fields with defaults so images always resolve even before drawer is opened
   const resolvedFields: ItemField[] = (() => {
@@ -1140,13 +1178,14 @@ export default memo(function BoardItem({
       {/* ── Preview Body — hidden when minimized ── */}
       {!item.minimized && (
         <div
-          className="flex flex-col gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
+          className="grid gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
+          style={{ gridTemplateColumns: previewLayout.columns === 2 ? 'repeat(2, minmax(0, 1fr))' : 'repeat(1, minmax(0, 1fr))' }}
           onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
           title="Click to open in focus panel"
           onPointerDownCapture={e => e.stopPropagation()}
         >
-          {previewFieldIds.map(fid => (
-            <PreviewField key={fid} fieldId={fid} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} />
+          {previewLayout.rows.map(slot => (
+            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} />
           ))}
           {/* Subtle hover gradient */}
           <div className="absolute inset-0 rounded-[5px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
