@@ -16,6 +16,7 @@ import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import { io } from 'socket.io-client';
+import { syncLinkTitles } from '@/lib/crossref';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
 
@@ -344,9 +345,13 @@ export default function Board({ boardId }: { boardId: string }) {
           return t;
         });
 
+        // Keep link-token title snapshots in sync with item titles so the UI
+        // (and the persisted copy) reflect renames immediately.
+        const syncedTabs = syncLinkTitles(updatedTabs);
+
         // Trigger asynchronous persistence
-        persistBoardState(updatedTabs);
-        return updatedTabs;
+        persistBoardState(syncedTabs);
+        return syncedTabs;
       });
     },
     [activeTabId, persistBoardState]

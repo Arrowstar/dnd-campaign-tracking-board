@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth';
 import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
+import { syncLinkTitles } from '@/lib/crossref';
 
 export const runtime = 'nodejs';
 
@@ -67,7 +68,9 @@ export async function POST(
       const storedRows = await sql`SELECT tabs FROM boards WHERE id = ${boardId} LIMIT 1`;
       const storedTabs: any[] = storedRows[0]?.tabs || [];
       const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role });
-      await sql`UPDATE boards SET tabs = ${JSON.stringify(merged)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
+      // Keep link-token title snapshots in sync with item titles.
+      const synced = syncLinkTitles(merged);
+      await sql`UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
     }
 
     return NextResponse.json({ success: true });
