@@ -224,6 +224,13 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').trim();
 }
 
+// Minimum card width. The header row packs a visibility icon, the title,
+// a type badge, and (when editable) three control buttons — at the old
+// 160px floor there often wasn't enough left-over space for the title to
+// render legibly (it would get crushed to a sliver or clipped). 200px
+// keeps cards compact while giving the title reliable room to breathe.
+const MIN_ITEM_WIDTH = 200;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,9 +370,12 @@ function PreviewField({ fieldId, item, fieldDefs, resolvedFields }: {
 
   // ── Text field — show first 2 lines of plain text ──
   if (def.type === 'text') {
-    const rawValue = def.isContentField
-      ? item.content
-      : resolvedFields.find(f => f.id === fieldId)?.textValue;
+    // Always read the live value from resolvedFields — it already merges
+    // saved item.fields over the item.content-seeded default, so this
+    // works correctly both before and after the field has been edited.
+    // (Reading item.content directly here was stale once a field existed,
+    // which is why long-form/rich-text content failed to show on the canvas.)
+    const rawValue = resolvedFields.find(f => f.id === fieldId)?.textValue;
     const plain = rawValue ? stripHtml(getPlainText(rawValue || '')) : '';
     if (!plain) return null;
     return (
@@ -429,8 +439,10 @@ export default memo(function BoardItem({
   const CurrentIcon = currentVisOpt.icon;
 
   // Zoom-scaled title font: larger when zoomed out so text stays legible
-  // At 100% zoom → 13px. At 50% zoom → ~18px (cap). At 200% → ~10px (floor).
-  const titleFontSize = Math.min(20, Math.max(10, 13 / zoomScale));
+  // At 100% zoom → 13px. At 50% zoom → 16px (cap). At 200% → ~10px (floor).
+  // Capped at 16 (was 20) so the title text can't grow large enough to
+  // starve the rest of the header row (badge/controls) of space.
+  const titleFontSize = Math.min(16, Math.max(10, 13 / zoomScale));
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewFieldIds = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
@@ -528,11 +540,11 @@ export default memo(function BoardItem({
       let newX = startItemX;
       let newY = startItemY;
 
-      if (direction.includes('right')) newWidth = Math.max(160, startWidth + dx);
+      if (direction.includes('right')) newWidth = Math.max(MIN_ITEM_WIDTH, startWidth + dx);
       if (direction.includes('left')) {
-        newWidth = Math.max(160, startWidth - dx);
-        if (newWidth > 160) newX = startItemX + dx;
-        else newX = startItemX + startWidth - 160;
+        newWidth = Math.max(MIN_ITEM_WIDTH, startWidth - dx);
+        if (newWidth > MIN_ITEM_WIDTH) newX = startItemX + dx;
+        else newX = startItemX + startWidth - MIN_ITEM_WIDTH;
       }
       if (direction.includes('bottom')) newHeight = Math.max(80, startHeight + dy);
       if (direction.includes('top')) {
@@ -630,7 +642,7 @@ export default memo(function BoardItem({
           backgroundColor: isLight ? 'rgba(0,0,0,0.04)' : `${itemColor}12`,
           borderBottom: item.minimized ? 'none' : isLight ? '1px solid rgba(0,0,0,0.1)' : `1px solid ${itemColor}30`,
         }}
-        className={`flex items-center justify-between px-2 py-1.5 rounded-t-[5px] select-none gap-1 ${canEdit ? 'cursor-move' : ''}`}
+        className={`flex items-center justify-between px-2 py-1.5 rounded-t-[5px] select-none gap-1 overflow-hidden ${canEdit ? 'cursor-move' : ''}`}
         onPointerDown={(e) => {
           if (!canEdit) return;
           const target = e.target as HTMLElement;
@@ -692,7 +704,8 @@ export default memo(function BoardItem({
         {/* Type badge */}
         <span
           style={isLight ? { backgroundColor: 'rgba(0,0,0,0.1)', color: '#374151' } : { backgroundColor: itemColor, color: '#FFFFFF' }}
-          className="text-[9px] font-bold uppercase tracking-wider flex-shrink-0 px-1 py-0.5 rounded"
+          className="text-[9px] font-bold uppercase tracking-wider flex-shrink-0 px-1 py-0.5 rounded truncate max-w-[64px]"
+          title={item.type}
         >
           {item.type}
         </span>
