@@ -23,6 +23,7 @@ import {
   Globe,
   Eye,
   Lock,
+  ChevronDown,
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
@@ -33,6 +34,7 @@ import {
   addLinkToValue,
   removeLinkFromValue,
   setTextInValue,
+  encodeTokens,
   hasContent,
   FieldToken,
   LinkToken,
@@ -43,11 +45,31 @@ import {
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type StructuredWidget =
+  | 'text'
+  | 'number'
+  | 'select'
+  | 'boolean'
+  | 'date'
+  | 'link'
+  | 'member'
+  | 'members';
+
 export interface StructuredBoxKey {
   /** Unique key stored in the JSON object */
   key: string;
   label: string;
   placeholder: string;
+  /** Input widget used for this sub-field. Defaults to 'text'. */
+  widget?: StructuredWidget;
+  /** Preset choices for 'select' widgets. */
+  options?: string[];
+  /** Numeric bounds/step for 'number' widgets. */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** For 'link' widgets: allow multiple links (default) or enforce a single link. */
+  multiple?: boolean;
 }
 
 export interface FieldDef {
@@ -162,6 +184,8 @@ interface StructuredBoardItemFieldsProps {
   typeLabel: string;
   /** All board items available for cross-reference linking. */
   allItems?: BoardItem[];
+  /** Board member display names, used for 'member'/'members' widget options. */
+  memberNames?: string[];
   /** Called when user clicks a linked chip to jump to that item on the canvas. */
   onScrollToItem?: (id: string) => void;
 }
@@ -198,6 +222,7 @@ export default function StructuredBoardItemFields({
   fieldDefs,
   typeLabel,
   allItems = [],
+  memberNames = [],
   onScrollToItem,
 }: StructuredBoardItemFieldsProps) {
 
@@ -235,18 +260,26 @@ export default function StructuredBoardItemFields({
   const [linkSearch, setLinkSearch] = useState('');
   const linkPickerRef = useRef<HTMLDivElement>(null);
 
-  // Close link picker on outside click
+  // Choice picker state (select / member / members widgets)
+  const [choicePicker, setChoicePicker] = useState<{ fieldId: string; key: string } | null>(null);
+  const [choiceCustom, setChoiceCustom] = useState<{ fieldId: string; key: string; text: string } | null>(null);
+  const choicePickerRef = useRef<HTMLDivElement>(null);
+
+  // Close pickers on outside click
   useEffect(() => {
-    if (!linkPicker) return;
+    if (!linkPicker && !choicePicker) return;
     const handleOutside = (e: MouseEvent) => {
-      if (linkPickerRef.current && !linkPickerRef.current.contains(e.target as Node)) {
-        setLinkPicker(null);
-        setLinkSearch('');
-      }
+      const inLink = linkPickerRef.current?.contains(e.target as Node);
+      const inChoice = choicePickerRef.current?.contains(e.target as Node);
+      if (inLink || inChoice) return;
+      setLinkPicker(null);
+      setLinkSearch('');
+      setChoicePicker(null);
+      setChoiceCustom(null);
     };
     document.addEventListener('mousedown', handleOutside, true);
     return () => document.removeEventListener('mousedown', handleOutside, true);
-  }, [linkPicker]);
+  }, [linkPicker, choicePicker]);
 
   // ── Field update helpers ──────────────────────────────────────────────────
   const updateFields = (newFields: ItemField[]) => {
@@ -466,6 +499,8 @@ export default function StructuredBoardItemFields({
     const linkedIds = new Set(
       currentTokens.filter(t => t.type === 'link').map(t => (t as LinkToken).id)
     );
+    const keyDef = keys.find(k => k.key === key);
+    const singleLink = keyDef?.widget === 'link' && keyDef.multiple === false;
 
     const filtered = allItems
       .filter(it => it.id !== item.id) // don't link to self
@@ -535,7 +570,9 @@ export default function StructuredBoardItemFields({
                           if (!fld) return;
                           const d = parseStructured(fld.textValue);
                           let newVal: string;
-                          if (alreadyLinked) {
+                          if (singleLink) {
+                            newVal = encodeTokens([{ type: 'link', id: boardItem.id, title: boardItem.title, itemType: boardItem.type }]);
+                          } else if (alreadyLinked) {
                             newVal = removeLinkFromValue(d[key] || '', boardItem.id);
                           } else {
                             newVal = addLinkToValue(d[key] || '', { id: boardItem.id, title: boardItem.title, itemType: boardItem.type });
@@ -565,7 +602,118 @@ export default function StructuredBoardItemFields({
         </div>
 
         <div className="px-2.5 py-1.5 border-t border-[#F0EDE6] text-[10px] text-[#8C7B6E] bg-[#FAFAF8]">
-          Click items to link/unlink. Multiple selections allowed.
+          {singleLink
+            ? 'Click an item to set the link (replaces the current one).'
+            : 'Click items to link/unlink. Multiple selections allowed.'}
+        </div>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render: Choice Picker (select / member / members widgets)
+  // ─────────────────────────────────────────────────────────────────────────
+  const renderChoicePicker = (fieldId: string, key: string, k: StructuredBoxKey, val: string, onRawChange: (key: string, rawText: string) => void) => {
+    const options = k.widget === 'member' || k.widget === 'members' ? memberNames : k.options || [];
+    const multi = k.widget === 'members';
+    const selected = multi ? val.split(', ').filter(Boolean) : [val];
+    const custom = choiceCustom?.fieldId === fieldId && choiceCustom?.key === key ? choiceCustom.text : '';
+
+    const commitCustom = () => {
+      if (!custom.trim()) return;
+      if (multi) {
+        onRawChange(key, [...selected, custom.trim()].join(', '));
+        setChoiceCustom({ fieldId, key, text: '' });
+      } else {
+        onRawChange(key, custom.trim());
+        setChoicePicker(null);
+        setChoiceCustom(null);
+      }
+    };
+
+    return (
+      <div
+        ref={choicePickerRef}
+        className="absolute z-[200] top-full left-0 mt-1 w-64 bg-white border border-[#D9D0C1] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+        onPointerDown={stop}
+        onMouseDown={stop}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="max-h-56 overflow-y-auto">
+          {options.length === 0 && (
+            <div className="text-center py-3 text-[11px] text-[#8C7B6E] italic">No options available</div>
+          )}
+          {options.map((opt) => {
+            const isSel = selected.includes(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                onPointerDown={stop}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (multi) {
+                    const next = isSel ? selected.filter(s => s !== opt) : [...selected, opt];
+                    onRawChange(key, next.join(', '));
+                  } else {
+                    onRawChange(key, opt);
+                    setChoicePicker(null);
+                    setChoiceCustom(null);
+                  }
+                }}
+                className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer hover:bg-[#F5F2ED] ${isSel ? 'bg-[#F0EDE6] text-[#2C2824] font-bold' : 'text-[#2C2824]'}`}
+              >
+                <span className="truncate">{opt}</span>
+                {isSel && <Check size={11} className="text-[#B58D3D] flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="px-2.5 py-2 border-t border-[#F0EDE6] bg-[#FAFAF8] flex flex-col gap-1.5">
+          <div className="text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E]">Custom value</div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={custom}
+              onChange={(e) => setChoiceCustom({ fieldId, key, text: e.target.value })}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') commitCustom();
+                if (e.key === 'Escape') { setChoicePicker(null); setChoiceCustom(null); }
+              }}
+              placeholder={multi ? 'Type a custom entry...' : 'Type your own value...'}
+              className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none text-[#2C2824] focus:border-[#B58D3D]"
+              onPointerDown={stop}
+            />
+            <button
+              type="button"
+              onPointerDown={stop}
+              onClick={(e) => { e.stopPropagation(); commitCustom(); }}
+              disabled={!custom.trim()}
+              className="px-2.5 py-1 bg-[#2C2824] hover:bg-[#423D38] disabled:bg-[#D9D0C1] disabled:cursor-not-allowed text-white text-[11px] font-bold rounded transition-colors cursor-pointer flex-shrink-0"
+            >
+              {multi ? 'Add' : 'Set'}
+            </button>
+          </div>
+          {!multi && val && (
+            <button
+              type="button"
+              onPointerDown={stop}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRawChange(key, '');
+                setChoicePicker(null);
+                setChoiceCustom(null);
+              }}
+              className="text-left text-[10px] text-red-600 hover:text-red-700 font-bold cursor-pointer"
+            >
+              Clear value
+            </button>
+          )}
+          <div className="text-[10px] text-[#8C7B6E]">
+            {multi ? 'Click entries to toggle. Custom entries are added.' : 'Pick a preset or type a custom value.'}
+          </div>
         </div>
       </div>
     );
@@ -584,10 +732,37 @@ export default function StructuredBoardItemFields({
       handleUpdateField(field.id, { textValue: stringifyStructured({ ...data, [key]: newVal }) });
     };
 
+    const handleRawChange = (key: string, rawText: string) => {
+      handleUpdateField(field.id, { textValue: stringifyStructured({ ...data, [key]: rawText }) });
+    };
+
+    const optionsFor = (k: StructuredBoxKey): string[] =>
+      k.widget === 'member' || k.widget === 'members' ? memberNames : k.options || [];
+
+    const formatDate = (val: string): string => {
+      const parts = val.split('-');
+      if (parts.length !== 3) return val;
+      const y = Number(parts[0]);
+      const m = Number(parts[1]);
+      const d = Number(parts[2]);
+      if (!y || !m || !d) return val;
+      return new Date(y, m - 1, d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    };
+
+    const openChoicePicker = (key: string, k: StructuredBoxKey, val: string) => {
+      setLinkPicker(null);
+      setLinkSearch('');
+      setEditingStructuredKey(null);
+      setChoicePicker({ fieldId: field.id, key });
+      const prefill = k.widget !== 'members' && val && !optionsFor(k).includes(val) ? val : '';
+      setChoiceCustom({ fieldId: field.id, key, text: prefill });
+    };
+
     return (
       <div className="flex flex-col gap-2.5 p-2.5" onPointerDown={stop} onPointerDownCapture={stop} onMouseDown={stop} onMouseDownCapture={stop}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {keys.map(({ key, label, placeholder }) => {
+          {keys.map((k) => {
+            const { key, label, placeholder, widget = 'text' } = k;
             const val = data[key] || '';
             const tokens = parseTokens(val);
             const textToken = tokens.find(t => t.type === 'text') as { type: 'text'; value: string } | undefined;
@@ -595,6 +770,9 @@ export default function StructuredBoardItemFields({
             const hasMeaningfulContent = hasContent(tokens);
             const isEditingKey = editingStructuredKey?.fieldId === field.id && editingStructuredKey?.key === key;
             const isLinkPickerOpen = linkPicker?.fieldId === field.id && linkPicker?.key === key;
+            const isChoicePickerOpen = choicePicker?.fieldId === field.id && choicePicker?.key === key;
+            const options = optionsFor(k);
+            const isCustomVal = (widget === 'select' || widget === 'member') && !!val && !options.includes(val);
 
             return (
               <div
@@ -615,6 +793,8 @@ export default function StructuredBoardItemFields({
                       onPointerDown={stop}
                       onClick={(e) => {
                         e.stopPropagation();
+                        setChoicePicker(null);
+                        setChoiceCustom(null);
                         if (isLinkPickerOpen) {
                           setLinkPicker(null);
                           setLinkSearch('');
@@ -643,14 +823,115 @@ export default function StructuredBoardItemFields({
                   </div>
                 )}
 
-                {/* Text sub-field (only shows the text portion) */}
-                {isEditingKey && canEdit ? (
+                {/* Sub-field body by widget */}
+                {widget === 'boolean' ? (
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    {(['Yes', 'No'] as const).map(opt => {
+                      const active = val === opt;
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onPointerDown={stop}
+                          onClick={(e) => { e.stopPropagation(); handleRawChange(key, active ? '' : opt); }}
+                          className={`px-3 py-1 text-[11px] font-bold rounded-full border transition-colors cursor-pointer ${active ? 'bg-[#2C2824] text-white border-[#2C2824]' : 'bg-white text-[#423D38] border-[#D9D0C1] hover:border-[#B58D3D]'}`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                    {val && (
+                      <button
+                        type="button"
+                        onPointerDown={stop}
+                        onClick={(e) => { e.stopPropagation(); handleRawChange(key, ''); }}
+                        className="text-[#8C7B6E] hover:text-red-600 text-[10px] font-bold cursor-pointer underline"
+                        title="Clear value"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                ) : widget === 'link' ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {textToken?.value && (
+                      <span className="text-xs text-[#2C2824] font-medium italic">{textToken.value}</span>
+                    )}
+                    {!hasLinks && !textToken?.value && (
+                      <span className="text-[#8C7B6E]/60 italic text-[11px]">
+                        {canEdit ? 'Not linked yet — use the link button' : 'Not recorded'}
+                      </span>
+                    )}
+                    {canEdit && allItems.length > 0 && (
+                      <button
+                        type="button"
+                        onPointerDown={stop}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setChoicePicker(null);
+                          setChoiceCustom(null);
+                          if (isLinkPickerOpen) {
+                            setLinkPicker(null);
+                            setLinkSearch('');
+                          } else {
+                            setLinkPicker({ fieldId: field.id, key });
+                            setLinkSearch('');
+                            setEditingStructuredKey(null);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-full border border-dashed text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                          isLinkPickerOpen
+                            ? 'bg-[#B58D3D] text-white border-[#B58D3D]'
+                            : 'text-[#B58D3D] border-[#B58D3D]/50 hover:bg-[#F5EDD8]'
+                        }`}
+                        title="Link to a board item"
+                      >
+                        <LinkIcon size={10} />
+                        <span>{isLinkPickerOpen ? 'Close' : hasLinks ? 'Link another' : 'Add link'}</span>
+                      </button>
+                    )}
+                  </div>
+                ) : widget === 'select' || widget === 'member' || widget === 'members' ? (
+                  isChoicePickerOpen && canEdit ? (
+                    renderChoicePicker(field.id, key, k, val, handleRawChange)
+                  ) : (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canEdit) openChoicePicker(key, k, val);
+                      }}
+                      className={`text-xs text-[#2C2824] min-h-[22px] py-0.5 px-1.5 rounded transition-colors font-sans flex items-center justify-between gap-1 ${
+                        canEdit ? 'cursor-pointer hover:bg-black/5 group/struct' : ''
+                      }`}
+                      title={canEdit ? `Click to choose ${label.toLowerCase()}` : undefined}
+                    >
+                      {val ? (
+                        <span className={`font-medium text-[#2C2824] truncate ${isCustomVal ? 'italic' : ''}`}>
+                          {isCustomVal ? `${val} (custom)` : val}
+                        </span>
+                      ) : (
+                        <span className="text-[#8C7B6E]/60 italic text-[11px]">
+                          {canEdit ? `Click to choose ${label.toLowerCase()}...` : 'Not recorded'}
+                        </span>
+                      )}
+                      {canEdit && (
+                        <ChevronDown size={11} className={`flex-shrink-0 ${isChoicePickerOpen ? 'text-[#B58D3D]' : 'opacity-0 group-hover/struct:opacity-60 text-[#8C7B6E]'}`} />
+                      )}
+                    </div>
+                  )
+                ) : isEditingKey && canEdit ? (
                   <input
-                    type="text"
-                    autoFocus
-                    value={textToken?.value || ''}
-                    onChange={(e) => handleTextChange(key, e.target.value)}
+                    type={widget === 'number' ? 'number' : widget === 'date' ? 'date' : 'text'}
+                    autoFocus={widget !== 'date'}
+                    value={widget === 'number' || widget === 'date' ? val : textToken?.value || ''}
+                    onChange={(e) => {
+                      if (widget === 'number' || widget === 'date') handleRawChange(key, e.target.value);
+                      else handleTextChange(key, e.target.value);
+                    }}
                     onBlur={() => setEditingStructuredKey(null)}
+                    min={widget === 'number' ? k.min : undefined}
+                    max={widget === 'number' ? k.max : undefined}
+                    step={widget === 'number' ? k.step : undefined}
                     placeholder={placeholder}
                     className="w-full text-xs py-1 px-2 bg-white border border-[#B58D3D] rounded outline-none text-[#2C2824] font-sans transition-colors"
                     onPointerDown={stop}
@@ -667,14 +948,22 @@ export default function StructuredBoardItemFields({
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (canEdit && !isLinkPickerOpen) setEditingStructuredKey({ fieldId: field.id, key });
+                      if (canEdit && !isChoicePickerOpen && !isLinkPickerOpen) setEditingStructuredKey({ fieldId: field.id, key });
                     }}
                     className={`text-xs text-[#2C2824] min-h-[22px] py-0.5 px-1.5 rounded transition-colors font-sans flex items-center justify-between gap-1 ${
                       canEdit ? 'cursor-pointer hover:bg-black/5 group/struct' : ''
                     }`}
                     title={canEdit ? `Click to edit ${label.toLowerCase()} text` : undefined}
                   >
-                    {textToken?.value ? (
+                    {widget === 'number' || widget === 'date' ? (
+                      val ? (
+                        <span className="font-medium text-[#2C2824]">{widget === 'date' ? formatDate(val) : val}</span>
+                      ) : (
+                        <span className="text-[#8C7B6E]/60 italic text-[11px]">
+                          {canEdit ? `Click to add ${label.toLowerCase()}...` : 'Not recorded'}
+                        </span>
+                      )
+                    ) : textToken?.value ? (
                       <span className="font-medium text-[#2C2824]">{textToken.value}</span>
                     ) : !hasMeaningfulContent ? (
                       <span className="text-[#8C7B6E]/60 italic text-[11px]">

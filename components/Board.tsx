@@ -61,6 +61,21 @@ export default function Board({ boardId }: { boardId: string }) {
   // Persistence status — surfaced in the UI instead of silently swallowed
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Board member display names (for member-select field widgets)
+  const [memberNames, setMemberNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetch(`/api/boards/${boardId}/members`, {
+      headers: { Authorization: `Bearer ${user.sessionToken}` },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.members) setMemberNames((data.members as { displayName: string }[]).map(m => m.displayName));
+      })
+      .catch(() => { /* member options are non-critical; field widgets fall back to Custom */ });
+  }, [boardId, user]);
+
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0] || {
     id: 'default-tab',
     name: 'Main Board',
@@ -1376,6 +1391,7 @@ export default function Board({ boardId }: { boardId: string }) {
               onDelete={handleDeleteItem}
               onClose={handleCloseFocus}
               onScrollToItem={handleScrollToItem}
+              memberNames={memberNames}
               width={drawerWidth}
               onWidthChange={setDrawerWidth}
             />

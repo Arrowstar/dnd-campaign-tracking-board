@@ -37,6 +37,8 @@ interface FocusDrawerProps {
   allItems: BoardItemType[];
   fieldDefs: FieldDef[] | null; // null for npc (uses its own component)
   typeLabel: string;
+  /** Board member display names, used for member-select widgets. */
+  memberNames?: string[];
   onUpdate: (item: BoardItemType) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -77,6 +79,7 @@ export default function FocusDrawer({
   allItems,
   fieldDefs,
   typeLabel,
+  memberNames,
   onUpdate,
   onDelete,
   onClose,
@@ -326,6 +329,7 @@ export default function FocusDrawer({
                   fieldDefs={fieldDefs}
                   typeLabel={typeLabel}
                   allItems={allItems}
+                  memberNames={memberNames}
                   onScrollToItem={onScrollToItem}
                 />
               ) : item.type === 'image' ? (

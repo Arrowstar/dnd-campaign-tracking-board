@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BoardItem, ItemField, AttachedFile, FieldType, User } from '@/lib/types';
 import {
   FileText, 
@@ -18,7 +18,8 @@ import {
   Tag,
   Sparkles,
   UserCheck,
-  Lock
+  Lock,
+  ChevronDown
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
@@ -68,6 +69,12 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
   'History of Interactions': 'Log of key interactions, deals, or encounters with the party...',
   'Other Notes': 'Free-form notes, background lore, stats, secrets...'
 };
+
+const ALIGNMENT_OPTIONS = [
+  'Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral',
+  'True Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil',
+  'Chaotic Evil', 'Unaligned',
+];
 
 export function getDefaultNpcFields(existingContent?: string): ItemField[] {
   const defaultFields: Array<{ id: string; label: string; build: () => ItemField }> = [
@@ -209,6 +216,23 @@ export default function NpcBoardItemFields({
   const [editingTraitKey, setEditingTraitKey] = useState<string | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [labelInput, setLabelInput] = useState<string>('');
+
+  // Alignment select picker state
+  const [traitPicker, setTraitPicker] = useState<string | null>(null);
+  const [traitCustom, setTraitCustom] = useState('');
+  const traitPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!traitPicker) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (traitPickerRef.current && !traitPickerRef.current.contains(e.target as Node)) {
+        setTraitPicker(null);
+        setTraitCustom('');
+      }
+    };
+    document.addEventListener('mousedown', handleOutside, true);
+    return () => document.removeEventListener('mousedown', handleOutside, true);
+  }, [traitPicker]);
   
   // Add custom field form state
   const [showAddField, setShowAddField] = useState(false);
@@ -366,11 +390,11 @@ export default function NpcBoardItemFields({
       handleUpdateField(field.id, { textValue: stringifyPersonalityTraits(updated) });
     };
 
-    const traitItems: Array<{ key: keyof PersonalityTraitsObj; label: string; placeholder: string }> = [
+    const traitItems: Array<{ key: keyof PersonalityTraitsObj; label: string; placeholder: string; widget?: 'text' | 'select'; options?: string[] }> = [
       { key: 'personality', label: 'Personality', placeholder: '1-sentence max (e.g., Warm, humorous, fiercely loyal)...' },
       { key: 'quirks', label: 'Quirks', placeholder: '1-sentence max (e.g., Constantly taps fingers when nervous)...' },
       { key: 'goals', label: 'Goals', placeholder: '1-sentence max (e.g., Seeking revenge on the Redbrands)...' },
-      { key: 'alignment', label: 'Alignment', placeholder: '1-sentence max (e.g., Neutral Good, Lawful Evil)...' },
+      { key: 'alignment', label: 'Alignment', placeholder: 'e.g. Neutral Good, Lawful Evil...', widget: 'select', options: ALIGNMENT_OPTIONS },
       { key: 'physical', label: 'Physical Traits', placeholder: '1-sentence max (e.g., Scarred half-orc with gold tooth)...' }
     ];
 
@@ -391,14 +415,17 @@ export default function NpcBoardItemFields({
       >
         {/* 5 Short Sentence Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {traitItems.map(({ key, label, placeholder }) => {
+          {traitItems.map(({ key, label, placeholder, widget = 'text', options = [] }) => {
             const val = traits[key] || '';
             const isEditingThisTrait = editingTraitKey === key;
+            const isPickingThisTrait = traitPicker === key;
+            const isSelect = widget === 'select';
+            const isCustom = isSelect && !!val && !options.includes(val);
 
             return (
               <div 
                 key={key} 
-                className={`flex flex-col rounded p-2 border transition-all ${
+                className={`flex flex-col rounded p-2 border transition-all relative ${
                   isLight 
                     ? 'bg-[#F9F7F3] border-[#E2D9CB]' 
                     : 'bg-black/20 border-white/10'
@@ -413,12 +440,135 @@ export default function NpcBoardItemFields({
                   <span className="text-[11px] font-bold text-[#423D38] uppercase tracking-wider font-sans">
                     {label}
                   </span>
-                  <span className="text-[8px] uppercase tracking-wider px-1 py-0.2 bg-[#B58D3D]/10 text-[#8C621E] border border-[#B58D3D]/20 rounded font-sans font-semibold">
-                    1 sentence max
+                  <span className={`text-[8px] uppercase tracking-wider px-1 py-0.2 rounded font-sans font-semibold ${
+                    isSelect
+                      ? 'bg-blue-500/10 text-blue-700 border border-blue-500/20'
+                      : 'bg-[#B58D3D]/10 text-[#8C621E] border border-[#B58D3D]/20'
+                  }`}>
+                    {isSelect ? 'Select' : '1 sentence max'}
                   </span>
                 </div>
 
-                {isEditingThisTrait && canEdit ? (
+                {isSelect ? (
+                  isPickingThisTrait && canEdit ? (
+                    <div
+                      ref={traitPickerRef}
+                      className="absolute z-[200] top-full left-0 mt-1 w-64 bg-white border border-[#D9D0C1] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+                      onPointerDown={stopImmediateEvent}
+                      onPointerDownCapture={stopImmediateEvent}
+                      onMouseDown={stopImmediateEvent}
+                      onMouseDownCapture={stopImmediateEvent}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="max-h-56 overflow-y-auto">
+                        {options.map(opt => {
+                          const isSel = val === opt;
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              onPointerDown={stopImmediateEvent}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTraitChange(key, opt);
+                                setTraitPicker(null);
+                                setTraitCustom('');
+                              }}
+                              className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer hover:bg-[#F5F2ED] ${
+                                isSel ? 'bg-[#F0EDE6] text-[#2C2824] font-bold' : 'text-[#2C2824]'
+                              }`}
+                            >
+                              <span className="truncate">{opt}</span>
+                              {isSel && <Check size={11} className="text-[#B58D3D] flex-shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="px-2.5 py-2 border-t border-[#F0EDE6] bg-[#FAFAF8] flex flex-col gap-1.5">
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E]">Custom value</div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={traitCustom}
+                            onChange={(e) => setTraitCustom(e.target.value)}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === 'Enter') {
+                                if (traitCustom.trim()) handleTraitChange(key, traitCustom.trim());
+                                setTraitPicker(null);
+                                setTraitCustom('');
+                              }
+                              if (e.key === 'Escape') {
+                                setTraitPicker(null);
+                                setTraitCustom('');
+                              }
+                            }}
+                            placeholder="Type your own value..."
+                            className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none text-[#2C2824] focus:border-[#B58D3D]"
+                            onPointerDown={stopImmediateEvent}
+                          />
+                          <button
+                            type="button"
+                            onPointerDown={stopImmediateEvent}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (traitCustom.trim()) handleTraitChange(key, traitCustom.trim());
+                              setTraitPicker(null);
+                              setTraitCustom('');
+                            }}
+                            disabled={!traitCustom.trim()}
+                            className="px-2.5 py-1 bg-[#2C2824] hover:bg-[#423D38] disabled:bg-[#D9D0C1] disabled:cursor-not-allowed text-white text-[11px] font-bold rounded transition-colors cursor-pointer flex-shrink-0"
+                          >
+                            Set
+                          </button>
+                        </div>
+                        {val && (
+                          <button
+                            type="button"
+                            onPointerDown={stopImmediateEvent}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTraitChange(key, '');
+                              setTraitPicker(null);
+                              setTraitCustom('');
+                            }}
+                            className="text-left text-[10px] text-red-600 hover:text-red-700 font-bold cursor-pointer"
+                          >
+                            Clear value
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canEdit) {
+                          setTraitPicker(key);
+                          setTraitCustom(isCustom ? val : '');
+                          setEditingTraitKey(null);
+                        }
+                      }}
+                      className={`text-xs text-[#2C2824] min-h-[26px] py-1 px-1.5 rounded transition-colors font-sans flex items-center justify-between gap-1 ${
+                        canEdit ? 'cursor-pointer hover:bg-black/5 group/trait' : ''
+                      }`}
+                      title={canEdit ? `Click to choose ${label.toLowerCase()}` : undefined}
+                    >
+                      {val ? (
+                        <span className={`font-medium text-[#2C2824] truncate ${isCustom ? 'italic' : ''}`}>
+                          {isCustom ? `${val} (custom)` : val}
+                        </span>
+                      ) : (
+                        <span className="text-[#8C7B6E]/60 italic text-[11px]">
+                          {canEdit ? `Click to choose ${label.toLowerCase()}...` : 'Not recorded'}
+                        </span>
+                      )}
+                      {canEdit && (
+                        <ChevronDown size={11} className="opacity-0 group-hover/trait:opacity-60 text-[#8C7B6E] flex-shrink-0" />
+                      )}
+                    </div>
+                  )
+                ) : isEditingThisTrait && canEdit ? (
                   <input
                     type="text"
                     autoFocus

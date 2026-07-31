@@ -29,17 +29,66 @@ import AnnotatedImagePreview from './AnnotatedImagePreview';
 // Per-type field definitions (re-exported so Board/Drawer can import them)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Preset option lists for select widgets (each also allows a custom value).
+const CLASS_OPTIONS = [
+  'Artificer', 'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk',
+  'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard',
+];
+const RACE_OPTIONS = [
+  'Aasimar', 'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Goliath', 'Half-Elf',
+  'Halfling', 'Half-Orc', 'Human', 'Orc', 'Tiefling', 'Warforged',
+];
+const ALIGNMENT_OPTIONS = [
+  'Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral',
+  'True Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil',
+  'Chaotic Evil', 'Unaligned',
+];
+const ATTITUDE_OPTIONS = ['Hostile', 'Unfriendly', 'Neutral', 'Friendly', 'Helpful'];
+const FACTION_SIZE_OPTIONS = [
+  'Small Band / Clique', 'Local Organization', 'Regional Power',
+  'Nationwide Influence', 'Massive Empire',
+];
+const LOCATION_TYPE_OPTIONS = [
+  'City', 'Town', 'Village', 'Hamlet', 'Dungeon', 'Cave', 'Ruin',
+  'Wilderness', 'Forest', 'Mountain', 'Coastline', 'Waterway',
+  'Tavern / Inn', 'Castle / Fort', 'Temple', 'Shop / Business', 'Other Structure',
+];
+const QUEST_STATUS_OPTIONS = ['Active', 'On Hold', 'Completed', 'Failed', 'Abandoned'];
+const QUEST_DIFFICULTY_OPTIONS = ['Trivial', 'Easy', 'Moderate', 'Hard', 'Deadly'];
+const RULE_SOURCE_OPTIONS = [
+  "Player's Handbook", "Dungeon Master's Guide", "Monster Manual",
+  "Xanathar's Guide to Everything", "Tasha's Cauldron of Everything",
+  "Mordenkainen's Tome of Foes", "Sword Coast Adventurer's Guide", 'Homebrew',
+];
+const RULE_CATEGORY_OPTIONS = [
+  'Combat', 'Magic', 'Social', 'Exploration', 'Movement', 'Rest & Recovery',
+  'Downtime', 'Equipment', 'Other',
+];
+const LOOT_RARITY_OPTIONS = [
+  'Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact', 'Varies / None',
+];
+const LOOT_TYPE_OPTIONS = [
+  'Weapon', 'Armor', 'Shield', 'Ring', 'Staff', 'Wand', 'Rod', 'Scroll',
+  'Potion', 'Wondrous Item', 'Ammunition', 'Coins / Treasure', 'Gem / Jewelry', 'Other',
+];
+const ATTUNEMENT_OPTIONS = ['No', 'Yes', 'Yes (restricted)'];
+const DOWNTIME_ACTIVITY_OPTIONS = [
+  'Crafting', 'Training', 'Carousing', 'Scribing', 'Research', 'Gambling',
+  'Practicing a Profession', 'Pit Fighting', 'Recuperating', 'Relaxing',
+  'Running a Business', 'Other',
+];
+
 export const CHARACTER_FIELDS: FieldDef[] = [
   { id: 'char-portrait', label: 'Character Portrait', type: 'image' },
   {
     id: 'char-stats', label: 'Stats & Info', type: 'structured',
     structuredKeys: [
-      { key: 'class', label: 'Class', placeholder: 'e.g. Fighter, Wizard, Rogue...' },
-      { key: 'race', label: 'Race', placeholder: 'e.g. Human, Elf, Dwarf...' },
-      { key: 'level', label: 'Level', placeholder: 'e.g. 5' },
-      { key: 'ac', label: 'AC', placeholder: 'e.g. 16' },
-      { key: 'hp', label: 'HP (Max)', placeholder: 'e.g. 52' },
-      { key: 'player', label: 'Player', placeholder: 'e.g. Adam' },
+      { key: 'class', label: 'Class', placeholder: 'e.g. Fighter, Wizard, Rogue...', widget: 'select', options: CLASS_OPTIONS },
+      { key: 'race', label: 'Race', placeholder: 'e.g. Human, Elf, Dwarf...', widget: 'select', options: RACE_OPTIONS },
+      { key: 'level', label: 'Level', placeholder: 'e.g. 5', widget: 'number', min: 1, max: 20 },
+      { key: 'ac', label: 'AC', placeholder: 'e.g. 16', widget: 'number', min: 1, max: 30 },
+      { key: 'hp', label: 'HP (Max)', placeholder: 'e.g. 52', widget: 'number', min: 1 },
+      { key: 'player', label: 'Player', placeholder: 'e.g. Adam', widget: 'member' },
     ],
   },
   { id: 'char-backstory', label: 'Backstory', type: 'text' },
@@ -54,17 +103,17 @@ export const FACTION_FIELDS: FieldDef[] = [
     id: 'faction-overview', label: 'Overview', type: 'structured',
     structuredKeys: [
       { key: 'leader', label: 'Leader', placeholder: 'e.g. Lord Nezznar...' },
-      { key: 'alignment', label: 'Alignment', placeholder: 'e.g. Lawful Evil...' },
+      { key: 'alignment', label: 'Alignment', placeholder: 'e.g. Lawful Evil...', widget: 'select', options: ALIGNMENT_OPTIONS },
       { key: 'base', label: 'Base of Operations', placeholder: 'e.g. Wave Echo Cave...' },
-      { key: 'size', label: 'Size / Strength', placeholder: 'e.g. Large, feared across the region...' },
-      { key: 'attitude', label: 'Attitude toward Party', placeholder: 'e.g. Hostile, Neutral, Friendly...' },
+      { key: 'size', label: 'Size / Strength', placeholder: 'e.g. Large, feared across the region...', widget: 'select', options: FACTION_SIZE_OPTIONS },
+      { key: 'attitude', label: 'Attitude toward Party', placeholder: 'e.g. Hostile, Neutral, Friendly...', widget: 'select', options: ATTITUDE_OPTIONS },
     ],
   },
   { id: 'faction-history', label: 'History & Lore', type: 'text' },
   {
     id: 'faction-members', label: 'Known Members', type: 'structured',
     structuredKeys: [
-      { key: 'members', label: 'Members & Associates', placeholder: 'Link characters, NPCs, or type names...' },
+      { key: 'members', label: 'Members & Associates', placeholder: 'Link characters, NPCs, or type names...', widget: 'link' },
     ],
   },
   { id: 'faction-activities', label: 'Current Activities', type: 'text', isContentField: true },
@@ -77,8 +126,8 @@ export const EVENT_FIELDS: FieldDef[] = [
     id: 'event-details', label: 'Event Details', type: 'structured',
     structuredKeys: [
       { key: 'date', label: 'Date / Time (In-Game)', placeholder: 'e.g. 3rd Mirtul, Year 1492...' },
-      { key: 'location', label: 'Location', placeholder: 'e.g. Phandalin Town Square...' },
-      { key: 'npcs', label: 'Key NPCs Involved', placeholder: 'e.g. Glasstaff, Sister Garaele...' },
+      { key: 'location', label: 'Location', placeholder: 'e.g. Phandalin Town Square...', widget: 'link', multiple: false },
+      { key: 'npcs', label: 'Key NPCs Involved', placeholder: 'e.g. Glasstaff, Sister Garaele...', widget: 'link' },
       { key: 'outcome', label: 'Outcome', placeholder: 'e.g. Party defeated the Redbrands...' },
     ],
   },
@@ -93,8 +142,8 @@ export const LOCATION_FIELDS: FieldDef[] = [
     id: 'loc-glance', label: 'At a Glance', type: 'structured',
     structuredKeys: [
       { key: 'region', label: 'Region / Continent', placeholder: 'e.g. Sword Coast, Faerûn...' },
-      { key: 'type', label: 'Type', placeholder: 'e.g. City, Dungeon, Wilderness...' },
-      { key: 'population', label: 'Population', placeholder: 'e.g. ~500 residents...' },
+      { key: 'type', label: 'Type', placeholder: 'e.g. City, Dungeon, Wilderness...', widget: 'select', options: LOCATION_TYPE_OPTIONS },
+      { key: 'population', label: 'Population', placeholder: 'e.g. ~500 residents...', widget: 'number', min: 0 },
       { key: 'government', label: 'Government', placeholder: 'e.g. Town Master...' },
       { key: 'feature', label: 'Notable Feature', placeholder: 'e.g. The Sleeping Giant tavern...' },
     ],
@@ -103,7 +152,7 @@ export const LOCATION_FIELDS: FieldDef[] = [
   {
     id: 'loc-npcs', label: 'Key NPCs & Shops', type: 'structured',
     structuredKeys: [
-      { key: 'npcs', label: 'NPCs & Merchants', placeholder: 'Link NPCs, Characters, or type names...' },
+      { key: 'npcs', label: 'NPCs & Merchants', placeholder: 'Link NPCs, Characters, or type names...', widget: 'link' },
     ],
   },
   { id: 'loc-secrets', label: 'Secrets & DM Notes', type: 'text' },
@@ -115,11 +164,11 @@ export const SESSION_FIELDS: FieldDef[] = [
   {
     id: 'sess-info', label: 'Session Info', type: 'structured',
     structuredKeys: [
-      { key: 'number', label: 'Session Number', placeholder: 'e.g. Session 7...' },
-      { key: 'played', label: 'Date Played (Real-World)', placeholder: 'e.g. July 29, 2026...' },
+      { key: 'number', label: 'Session Number', placeholder: 'e.g. Session 7...', widget: 'number', min: 1 },
+      { key: 'played', label: 'Date Played (Real-World)', placeholder: 'e.g. July 29, 2026...', widget: 'date' },
       { key: 'ingame', label: 'In-Game Date', placeholder: 'e.g. 4th Mirtul, 1492 DR...' },
-      { key: 'locations', label: 'Location(s)', placeholder: 'e.g. Phandalin, Tresendar Manor...' },
-      { key: 'players', label: 'Players Present', placeholder: 'e.g. Adam, Beth, Carlos...' },
+      { key: 'locations', label: 'Location(s)', placeholder: 'e.g. Phandalin, Tresendar Manor...', widget: 'link' },
+      { key: 'players', label: 'Players Present', placeholder: 'e.g. Adam, Beth, Carlos...', widget: 'members' },
     ],
   },
   { id: 'sess-summary', label: 'Summary', type: 'text', isContentField: true },
@@ -133,11 +182,11 @@ export const QUEST_FIELDS: FieldDef[] = [
   {
     id: 'quest-info', label: 'Quest Info', type: 'structured',
     structuredKeys: [
-      { key: 'giver', label: 'Quest Giver', placeholder: 'e.g. Sildar Hallwinter...' },
-      { key: 'status', label: 'Status', placeholder: 'e.g. Active, Completed, Failed, On Hold...' },
+      { key: 'giver', label: 'Quest Giver', placeholder: 'e.g. Sildar Hallwinter...', widget: 'link', multiple: false },
+      { key: 'status', label: 'Status', placeholder: 'e.g. Active, Completed, Failed, On Hold...', widget: 'select', options: QUEST_STATUS_OPTIONS },
       { key: 'reward', label: 'Reward', placeholder: 'e.g. 200gp, a magic item...' },
       { key: 'deadline', label: 'Deadline (In-Game)', placeholder: 'e.g. Before the next full moon...' },
-      { key: 'difficulty', label: 'Difficulty', placeholder: 'e.g. CR 5 encounters, deadly...' },
+      { key: 'difficulty', label: 'Difficulty', placeholder: 'e.g. CR 5 encounters, deadly...', widget: 'select', options: QUEST_DIFFICULTY_OPTIONS },
     ],
   },
   { id: 'quest-objective', label: 'Objective', type: 'text', isContentField: true },
@@ -156,9 +205,9 @@ export const RULE_FIELDS: FieldDef[] = [
   {
     id: 'rule-info', label: 'Rule Info', type: 'structured',
     structuredKeys: [
-      { key: 'source', label: 'Source', placeholder: 'e.g. PHB p.195, DMG, Homebrew...' },
+      { key: 'source', label: 'Source', placeholder: 'e.g. PHB p.195, DMG, Homebrew...', widget: 'select', options: RULE_SOURCE_OPTIONS },
       { key: 'page', label: 'Page / Section', placeholder: 'e.g. Chapter 9: Combat...' },
-      { key: 'category', label: 'Category', placeholder: 'e.g. Combat, Magic, Social...' },
+      { key: 'category', label: 'Category', placeholder: 'e.g. Combat, Magic, Social...', widget: 'select', options: RULE_CATEGORY_OPTIONS },
     ],
   },
   { id: 'rule-text', label: 'Rule Text', type: 'text', isContentField: true },
@@ -171,11 +220,11 @@ export const LOOT_FIELDS: FieldDef[] = [
   {
     id: 'loot-details', label: 'Item Details', type: 'structured',
     structuredKeys: [
-      { key: 'rarity', label: 'Rarity', placeholder: 'e.g. Uncommon, Rare, Legendary...' },
-      { key: 'type', label: 'Type', placeholder: 'e.g. Weapon, Armor, Wondrous, Gold...' },
-      { key: 'value', label: 'Value', placeholder: 'e.g. 500gp, priceless...' },
-      { key: 'attunement', label: 'Attunement Required', placeholder: 'e.g. Yes (Wizard), No...' },
-      { key: 'heldBy', label: 'Held By', placeholder: 'e.g. Thorin, Party Treasury...' },
+      { key: 'rarity', label: 'Rarity', placeholder: 'e.g. Uncommon, Rare, Legendary...', widget: 'select', options: LOOT_RARITY_OPTIONS },
+      { key: 'type', label: 'Type', placeholder: 'e.g. Weapon, Armor, Wondrous, Gold...', widget: 'select', options: LOOT_TYPE_OPTIONS },
+      { key: 'value', label: 'Value (gp)', placeholder: 'e.g. 500', widget: 'number', min: 0 },
+      { key: 'attunement', label: 'Attunement Required', placeholder: 'e.g. Yes (Wizard), No...', widget: 'select', options: ATTUNEMENT_OPTIONS },
+      { key: 'heldBy', label: 'Held By', placeholder: 'e.g. Thorin, Party Treasury...', widget: 'link', multiple: false },
     ],
   },
   { id: 'loot-description', label: 'Description & Properties', type: 'text', isContentField: true },
@@ -188,10 +237,10 @@ export const DOWNTIME_FIELDS: FieldDef[] = [
   {
     id: 'dt-details', label: 'Activity Details', type: 'structured',
     structuredKeys: [
-      { key: 'character', label: 'Character', placeholder: 'e.g. Thorin...' },
-      { key: 'activityType', label: 'Activity Type', placeholder: 'e.g. Crafting, Training, Carousing...' },
-      { key: 'duration', label: 'Duration', placeholder: 'e.g. 10 days...' },
-      { key: 'cost', label: 'Cost', placeholder: 'e.g. 50gp...' },
+      { key: 'character', label: 'Character', placeholder: 'e.g. Thorin...', widget: 'link', multiple: false },
+      { key: 'activityType', label: 'Activity Type', placeholder: 'e.g. Crafting, Training, Carousing...', widget: 'select', options: DOWNTIME_ACTIVITY_OPTIONS },
+      { key: 'duration', label: 'Duration (days)', placeholder: 'e.g. 10', widget: 'number', min: 0 },
+      { key: 'cost', label: 'Cost (gp)', placeholder: 'e.g. 50', widget: 'number', min: 0 },
       { key: 'outcome', label: 'Outcome / Roll Result', placeholder: 'e.g. Rolled 18, success...' },
     ],
   },
