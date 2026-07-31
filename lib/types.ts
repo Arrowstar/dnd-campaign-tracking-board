@@ -48,8 +48,8 @@ export type PreviewFieldMode = 'auto' | 'hero' | 'thumb' | 'compact' | 'expanded
 export type PreviewFieldSlot = {
   /** FieldDef id (or '__image_content__' sentinel for image-type items). */
   fieldId: string;
-  /** Grid columns occupied when the card preview uses 2 columns (1 = half width, 2 = full row). */
-  span?: 1 | 2;
+  /** Grid columns occupied (1 = one column, up to the layout's column count = full row). */
+  span?: 1 | 2 | 3 | 4;
   /** How the field renders in the card preview. 'auto' picks a sensible default per field type. */
   mode?: PreviewFieldMode;
   /** Line clamp for rich text previews. Ignored when mode is 'expanded'. */
@@ -58,7 +58,7 @@ export type PreviewFieldSlot = {
 
 export type PreviewLayout = {
   /** Number of columns in the card preview grid. */
-  columns: 1 | 2;
+  columns: 1 | 2 | 3 | 4;
   /** Ordered list of preview slots. */
   rows: PreviewFieldSlot[];
 };

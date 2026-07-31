@@ -166,7 +166,7 @@ export default function FocusDrawer({
     onUpdate({ ...item, previewLayout: updatePreviewSlot(resolvePreviewLayout(item, item.type, fieldDefs), fieldId, patch) });
   };
 
-  const changePreviewColumns = (columns: 1 | 2) => {
+  const changePreviewColumns = (columns: PreviewLayout['columns']) => {
     if (!item || !canEdit) return;
     onUpdate({ ...item, previewLayout: setPreviewColumns(resolvePreviewLayout(item, item.type, fieldDefs), columns) });
   };
@@ -480,11 +480,13 @@ export default function FocusDrawer({
                     options={[
                       { value: 1, label: '1', title: 'Single column (stacked)' },
                       { value: 2, label: '2', title: 'Two columns — short fields flow side by side' },
+                      { value: 3, label: '3', title: 'Three columns for denser layouts' },
+                      { value: 4, label: '4', title: 'Four columns for compact multi-field layouts' },
                     ]}
                     onChange={changePreviewColumns}
                   />
                   <p className="text-[10px] text-[#8C7B6E] leading-snug max-w-[140px]">
-                    Two columns let short fields flow side by side.
+                    More columns let short fields flow side by side.
                   </p>
                 </div>
                 <CardPreviewMini layout={previewLayout} item={item} fieldDefs={fieldDefs} />
@@ -521,7 +523,7 @@ export default function FocusDrawer({
               )}
 
               <div className="pt-3 border-t border-[#D9D0C1] text-[10px] text-[#8C7B6E]">
-                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields. Open the sliders on a field to switch between half/full width, hero banners vs thumbnails, and line clamps for long text.
+                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields. Open the sliders on a field to switch between partial/full width, hero banners vs thumbnails, and line clamps for long text. Images on the card can be annotated directly — draw on them with the pen tool.
               </div>
             </div>
           )}
@@ -576,6 +578,24 @@ const STYLE_OPTIONS: Record<'image' | 'text' | 'structured', { value: PreviewFie
     { value: 'expanded', label: 'Expanded', title: 'Show every entry' },
   ],
 };
+
+const COLUMN_FRACTION_LABELS: Record<number, Record<number, string>> = {
+  2: { 1: 'Half' },
+  3: { 1: '1/3', 2: '2/3' },
+  4: { 1: '1/4', 2: '1/2', 3: '3/4' },
+};
+
+function widthOptionsFor(layout: PreviewLayout): { value: 1 | 2 | 3 | 4; label: string; title: string }[] {
+  return Array.from({ length: layout.columns }, (_, i) => {
+    const n = (i + 1) as 1 | 2 | 3 | 4;
+    const isFull = n === layout.columns;
+    return {
+      value: n,
+      label: isFull ? 'Full' : (COLUMN_FRACTION_LABELS[layout.columns]?.[n] ?? `${n}`),
+      title: isFull ? 'Spans the full card width' : `Occupies ${n} of ${layout.columns} columns`,
+    };
+  });
+}
 
 function PreviewFieldRow({ id, label, fieldType, fieldVis, layout, onToggle, onMove, onPatch }: {
   id: string;
@@ -654,17 +674,16 @@ function PreviewFieldRow({ id, label, fieldType, fieldVis, layout, onToggle, onM
 
       {isOn && expanded && (
         <div className="px-3 pb-3 flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Width</span>
-            <Segmented
-              value={(slot?.span ?? 1) as 1 | 2}
-              options={[
-                { value: 1 as const, label: 'Half', title: 'Occupies one column' },
-                { value: 2 as const, label: 'Full', title: 'Spans the full card width' },
-              ]}
-              onChange={v => onPatch(id, { span: v })}
-            />
-          </div>
+          {layout.columns > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Width</span>
+              <Segmented
+                value={(slot?.span ?? 1) as 1 | 2 | 3 | 4}
+                options={widthOptionsFor(layout)}
+                onChange={v => onPatch(id, { span: v })}
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="w-9 text-[9px] font-bold uppercase tracking-wider text-[#8C7B6E] flex-shrink-0">Style</span>
             <Segmented
@@ -776,12 +795,12 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   fieldDefs: FieldDef[] | null;
-  columns: 1 | 2;
+  columns: PreviewLayout['columns'];
 }) {
   const fieldType = classifyPreviewField(slot.fieldId, item.type, fieldDefs);
   const mode = resolveFieldMode(slot, fieldType, columns);
   const span = resolveFieldSpan(slot, fieldType, columns, mode);
-  const spanStyle = columns === 2 && span === 2 ? { gridColumn: 'span 2' } : undefined;
+  const spanStyle = columns === 1 ? undefined : { gridColumn: `span ${span}` };
   const hasContent = hasPreviewContent(item, slot, fieldType, fieldDefs);
 
   if (!hasContent) {

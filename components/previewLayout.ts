@@ -92,7 +92,7 @@ export function updatePreviewSlot(layout: PreviewLayout, fieldId: string, patch:
   };
 }
 
-export function setPreviewColumns(layout: PreviewLayout, columns: 1 | 2): PreviewLayout {
+export function setPreviewColumns(layout: PreviewLayout, columns: PreviewLayout['columns']): PreviewLayout {
   return { ...layout, columns };
 }
 
@@ -104,24 +104,24 @@ export function setPreviewColumns(layout: PreviewLayout, columns: 1 | 2): Previe
 export function resolveFieldMode(
   slot: PreviewFieldSlot,
   fieldType: 'image' | 'text' | 'structured',
-  columns: 1 | 2
+  columns: PreviewLayout['columns']
 ): Exclude<PreviewFieldMode, 'auto'> {
   if (slot.mode && slot.mode !== 'auto') return slot.mode;
-  if (fieldType === 'image') return columns === 2 && slot.span === 1 ? 'thumb' : 'hero';
+  if (fieldType === 'image') return columns > 1 && slot.span === 1 ? 'thumb' : 'hero';
   return 'compact';
 }
 
-/** Effective grid span for a slot (1 = half width, 2 = full row). */
+/** Effective grid span for a slot (1 = single column, columns = full row). */
 export function resolveFieldSpan(
   slot: PreviewFieldSlot,
   fieldType: 'image' | 'text' | 'structured',
-  columns: 1 | 2,
+  columns: PreviewLayout['columns'],
   mode: Exclude<PreviewFieldMode, 'auto'>
-): 1 | 2 {
+): 1 | 2 | 3 | 4 {
   if (columns === 1) return 1;
   if (slot.span) return slot.span;
-  if (fieldType === 'image') return mode === 'thumb' ? 1 : 2;
-  if (mode === 'expanded') return 2;
+  if (fieldType === 'image') return mode === 'thumb' ? 1 : columns;
+  if (mode === 'expanded') return columns;
   return 1;
 }
 

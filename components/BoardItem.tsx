@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from 'react';
 import { motion } from 'motion/react';
-import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout, DrawingLine } from '@/lib/types';
 import { canViewField } from '@/lib/fieldVisibility';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
@@ -325,7 +325,7 @@ interface BoardItemProps {
 // are 72px-tall strips that fill the column width. (Hardcoded in the class
 // names below — Tailwind needs static classes.)
 
-function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: {
+function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, canEdit, onUpdate }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   user: User;
@@ -333,9 +333,22 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   /** Pre-resolved fields array (may include defaults merged in) */
   resolvedFields: ItemField[];
   /** Number of columns in the preview grid (from the item's preview layout) */
-  columns: 1 | 2;
+  columns: PreviewLayout['columns'];
+  /** Whether the current user may edit this item (enables in-place annotation) */
+  canEdit: boolean;
+  onUpdate: (item: BoardItemType) => void;
 }) {
   const { fieldId } = slot;
+
+  /** Persist annotation lines onto a field that may not exist in item.fields yet. */
+  const updateFieldLines = (fieldId: string, lines: DrawingLine[]) => {
+    const existing = item.fields ?? [];
+    const idx = existing.findIndex(f => f.id === fieldId);
+    const next = idx >= 0
+      ? existing.map((f, i) => (i === idx ? { ...f, lines } : f))
+      : [...existing, { id: fieldId, label: fieldLabel, type: 'image' as const, imageUrl: field?.imageUrl, lines }];
+    onUpdate({ ...item, fields: next });
+  };
 
   // ── image-type board items store their content in item.content ──
   if (item.type === 'image' && fieldId === '__image_content__') {
@@ -346,6 +359,8 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           imageUrl={item.content}
           lines={item.lines}
           alt="Image"
+          canEdit={canEdit}
+          onLinesChange={canEdit ? (lines) => onUpdate({ ...item, lines }) : undefined}
           imgClassName="w-full h-full object-contain pointer-events-none select-none"
         />
       </div>
@@ -363,7 +378,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   const fieldLabel = def?.label ?? field?.label ?? fieldId;
   const mode = resolveFieldMode(slot, fieldType, columns);
   const span = resolveFieldSpan(slot, fieldType, columns, mode);
-  const spanStyle = columns === 2 && span === 2 ? { gridColumn: 'span 2' } : undefined;
+  const spanStyle = columns === 1 ? undefined : { gridColumn: `span ${span}` };
 
   // ── NPC: portrait ──
   if (item.type === 'npc' && fieldId === 'npc-image') {
@@ -387,6 +402,8 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           imageUrl={imageUrl}
           lines={field?.lines}
           alt="NPC portrait"
+          canEdit={canEdit}
+          onLinesChange={canEdit ? (lines) => updateFieldLines(fieldId, lines) : undefined}
           imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
         />
       </div>
@@ -415,6 +432,8 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           imageUrl={imageUrl}
           lines={field?.lines}
           alt={fieldLabel}
+          canEdit={canEdit}
+          onLinesChange={canEdit ? (lines) => updateFieldLines(fieldId, lines) : undefined}
           imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
         />
       </div>
@@ -438,7 +457,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
       return (
         <div
           style={spanStyle}
-          className={`min-h-0 ${columns === 2 && span === 2 && entries.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
+          className={`min-h-0 ${span === columns && entries.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
         >
           {entries.map(([k, v]) => (
             <div key={k} className="flex items-baseline gap-1 text-[10px] leading-tight">
@@ -459,7 +478,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
     return (
       <div
         style={spanStyle}
-        className={`min-h-0 ${columns === 2 && span === 2 && shown.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
+        className={`min-h-0 ${span === columns && shown.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
       >
         {shown.map(e => (
           <div key={e.label} className="flex items-baseline gap-1 text-[10px] leading-tight">
@@ -1180,13 +1199,17 @@ export default memo(function BoardItem({
       {!item.minimized && (
         <div
           className="grid content-start gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
-          style={{ gridTemplateColumns: previewLayout.columns === 2 ? 'repeat(2, minmax(0, 1fr))' : 'repeat(1, minmax(0, 1fr))' }}
+          style={{ gridTemplateColumns: `repeat(${previewLayout.columns}, minmax(0, 1fr))` }}
           onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
           title="Click to open in focus panel"
-          onPointerDownCapture={e => e.stopPropagation()}
+          onPointerDownCapture={e => {
+            const t = e.target as HTMLElement;
+            if (t.closest && t.closest('[data-no-drag]')) return;
+            e.stopPropagation();
+          }}
         >
           {previewLayout.rows.map(slot => (
-            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} />
+            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} canEdit={canEdit} onUpdate={onUpdate} />
           ))}
           {/* Subtle hover gradient */}
           <div className="absolute inset-0 rounded-[5px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
