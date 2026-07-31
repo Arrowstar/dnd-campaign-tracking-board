@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useRef, useEffect, memo } from 'react';
@@ -246,6 +247,32 @@ function stripHtml(html: string): string {
 // keeps cards compact while giving the title reliable room to breathe.
 const MIN_ITEM_WIDTH = 200;
 
+// ── Level-of-Detail thresholds (with hysteresis gaps) ────────────────────────
+const TIER0_THRESHOLD = 130;  // full card
+const TIER0_HYSTERESIS = 145; // expand back up only above this
+const TIER1_THRESHOLD = 45;  // image-forward compact / pin boundary
+const TIER1_HYSTERESIS = 55; // expand back to tier 1 only above this
+
+function getTier(
+  effW: number,
+  hasImage: boolean,
+  prevTier?: number
+): number {
+  if (prevTier === 2) {
+    if (effW >= TIER0_HYSTERESIS) return 0;
+    if (effW >= TIER1_HYSTERESIS) return 1;
+    return 2;
+  }
+  if (prevTier === 1) {
+    if (effW >= TIER0_THRESHOLD) return 0;
+    if (effW < TIER1_THRESHOLD) return 2;
+    return 1;
+  }
+  if (effW >= TIER0_THRESHOLD) return 0;
+  if (hasImage && effW >= TIER1_THRESHOLD) return 1;
+  return 2;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,6 +498,13 @@ export default memo(function BoardItem({
   // starve the rest of the header row (badge/controls) of space.
   const titleFontSize = Math.min(16, Math.max(10, 13 / zoomScale));
 
+  // Per-item LOD tier based on rendered pixel size (computed after resolvedFields)
+  const prevTierRef = useRef<number>(0);
+  const effW = item.width * zoomScale;
+  const hasImage = item.type === 'image' || resolvedFields.some(f => f.type === 'image' && !!f.imageUrl);
+  const tier = getTier(effW, hasImage, prevTierRef.current);
+  prevTierRef.current = tier;
+
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewFieldIds = item.previewFields ?? getDefaultPreviewFields(item.type, fieldDefs);
 
@@ -663,6 +697,45 @@ export default memo(function BoardItem({
       }}
       onDrop={canAcceptImageDrop ? handleCardDrop : undefined}
     >
+      {/* Tier 2 — Pin / Badge */}
+      {tier === 2 && (
+        <div
+          className="w-full h-full rounded-full flex flex-col items-center justify-center overflow-hidden shadow-lg relative"
+          style={{ backgroundColor: itemColor }}
+          title={`${item.title} (${item.type})`}
+        >
+          <span className="text-white text-[9px] font-bold uppercase tracking-wide opacity-90">{item.type}</span>
+          <span className="text-white text-[7px] font-serif italic truncate px-1 text-center leading-tight">{item.title}</span>
+          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#F5F2ED] border border-[#B58D3D] flex items-center justify-center">
+            <span className="text-[5px] font-black text-[#B58D3D]">{item.type[0]?.toUpperCase()}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Tier 1 — Image-forward compact */}
+      {tier === 1 && (
+        <>
+          <div className="flex-1 overflow-hidden relative">
+            {(() => {
+              const imgField = resolvedFields.find(f => f.type === 'image' && f.imageUrl);
+              const url = imgField?.imageUrl || (item.type === 'image' ? item.content : null);
+              if (url) {
+                return (
+                  <img src={url} alt={item.title} className="w-full h-full object-cover object-top pointer-events-none select-none" />
+                );
+              }
+              return <div className="w-full h-full flex items-center justify-center bg-[#F5F2ED] text-[8px] font-bold text-[#8C7B6E]">{item.title}</div>;
+            })()}
+          </div>
+          <div className="px-1.5 py-1 bg-black/10 border-t border-black/5">
+            <span className="block text-[9px] font-bold font-serif italic truncate text-center" style={{ color: itemColor }}>{item.title}</span>
+          </div>
+        </>
+      )}
+
+      {/* Tier 0 — Full card */}
+      {tier === 0 && (
+        <>
       {/* ── Header / Drag Handle ── */}
       <div
         style={{
@@ -861,6 +934,8 @@ export default memo(function BoardItem({
           <span>{item.comments?.length || 0}</span>
         </button>
       </div>
+        </>
+      )}
     </motion.div>
   );
 });
