@@ -1117,10 +1117,12 @@ export default function AnnotationCanvas({
                   )}
 
                   {/* ROTATION HANDLE for Rectangle / Circle / Text */}
+                  {/* Positioned on the shape's right side so the floating quick
+                      bar (anchored above the top-center) never covers it. */}
                   {(ann.type === 'rectangle' || ann.type === 'circle' || ann.type === 'text') && (() => {
-                    const handleDist = (geom.height ?? defH) / 2 + 28;
-                    const hx = centerX + Math.sin(rotRad) * handleDist;
-                    const hy = centerY - Math.cos(rotRad) * handleDist;
+                    const handleDist = (geom.width ?? defW) / 2 + 28;
+                    const hx = centerX + Math.cos(rotRad) * handleDist;
+                    const hy = centerY + Math.sin(rotRad) * handleDist;
                     return (
                       <g className="no-pan">
                         <line
