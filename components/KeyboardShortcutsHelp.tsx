@@ -1,6 +1,6 @@
 'use client';
 
-import { X, Keyboard, MousePointerClick, Trash2, Move, ZoomIn, ZoomOut, RotateCcw, Maximize2, CornerDownLeft, CornerUpLeft, ExternalLink } from 'lucide-react';
+import { X, Keyboard, MousePointerClick, Trash2, Move, ZoomIn, ZoomOut, RotateCcw, Maximize2, CornerDownLeft, CornerUpLeft, ExternalLink, Undo2, Redo2 } from 'lucide-react';
 
 interface KeyboardShortcutsHelpProps {
   isOpen: boolean;
@@ -31,6 +31,16 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
       { keys: ['Delete', 'Backspace'], action: 'Delete the selected item or annotation', detail: 'Instant — no confirmation' },
       { keys: ['↑ ↓ ← →'], action: 'Nudge selected item or annotation 1px' },
       { keys: ['Shift + ↑ ↓ ← →'], action: 'Nudge selected item or annotation 10px' },
+    ],
+  },
+  {
+    title: 'History',
+    icon: <Undo2 size={14} className="text-[#B58D3D]" />,
+    rows: [
+      { keys: ['Ctrl', 'Z'], action: 'Undo the last change', detail: 'Works while editing cards and tabs' },
+      { keys: ['Ctrl', 'Shift', 'Z'], action: 'Redo the last change' },
+      { keys: ['Ctrl', 'Y'], action: 'Redo (Windows)' },
+      { keys: ['Toolbar buttons'], action: 'Undo / Redo with one click', detail: 'Available in the top bar' },
     ],
   },
   {

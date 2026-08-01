@@ -7,7 +7,8 @@ import {
   Swords, Flag, Shield, Activity, Image as ImageIcon,
   MoveRight, X, Palette, Sliders, Minus, MoveHorizontal,
   Circle, Square, Type, Pencil, MousePointer, LogOut,
-  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound, Keyboard
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound, Keyboard,
+  Undo2, Redo2
 } from 'lucide-react';
 import { 
   ANNOTATION_COLOR_PRESETS, 
@@ -71,6 +72,10 @@ interface ToolbarProps {
   onOpenMembersModal?: () => void;
   onOpenSettingsModal?: () => void;
   onOpenShortcutsHelp?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export default function Toolbar({ 
@@ -101,6 +106,10 @@ export default function Toolbar({
   onOpenMembersModal,
   onOpenSettingsModal,
   onOpenShortcutsHelp,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: ToolbarProps) {
   const [showConnectSettings, setShowConnectSettings] = useState(false);
   const [showAnnSettings, setShowAnnSettings] = useState(false);
@@ -177,6 +186,34 @@ export default function Toolbar({
             >
               <Keyboard size={14} className="text-[#B58D3D]" />
               <span>Shortcuts</span>
+            </button>
+          )}
+
+          <div className="h-6 w-px bg-[#B58D3D] opacity-30" />
+
+          {onUndo && (
+            <button
+              type="button"
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38]"
+              title="Undo last change (Ctrl+Z)"
+            >
+              <Undo2 size={14} className="text-[#B58D3D]" />
+              <span>Undo</span>
+            </button>
+          )}
+
+          {onRedo && (
+            <button
+              type="button"
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38]"
+              title="Redo last change (Ctrl+Shift+Z / Ctrl+Y)"
+            >
+              <Redo2 size={14} className="text-[#B58D3D]" />
+              <span>Redo</span>
             </button>
           )}
 

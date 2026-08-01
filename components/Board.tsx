@@ -30,6 +30,13 @@ const BOARD_ITEM_LOD_THRESHOLDS = {
   pinScreenSize: 36,
 };
 
+// Undo/redo history: maximum retained steps, and the time window in which
+// consecutive mutations to the same target (item/connection/annotation/tab)
+// are merged into a single undo step (e.g. per-keystroke typing, annotation
+// drags, connection label editing).
+const HISTORY_LIMIT = 50;
+const COALESCE_MS = 1000;
+
 function getBoxIntersection(cx: number, cy: number, hw: number, hh: number, targetCx: number, targetCy: number) {
   const dx = targetCx - cx;
   const dy = targetCy - cy;
@@ -150,6 +157,29 @@ export default function Board({ boardId }: { boardId: string }) {
   // Revision of the board state whose full payload we last applied locally.
   // The realtime poller only downloads the full board when this changes.
   const appliedRevisionRef = useRef<string | null>(null);
+
+  // ── Undo / Redo history ─────────────────────────────────────────────────────
+  // Snapshot-based: every local mutation funnels through saveState /
+  // saveFullTabsState, which record { before, after } snapshots of the full
+  // tabs array + active tab id. Remote realtime applies call setTabs directly
+  // and never enter the history, so undo only ever reverts local actions.
+  type HistorySnapshot = { tabs: BoardTab[]; activeTabId: string };
+  type HistoryEntry = {
+    key: string;
+    time: number;
+    before: HistorySnapshot;
+    after: HistorySnapshot;
+  };
+  const undoStackRef = useRef<HistoryEntry[]>([]);
+  const redoStackRef = useRef<HistoryEntry[]>([]);
+  const uniqueMutationRef = useRef(0);
+  const [undoCount, setUndoCount] = useState(0);
+  const [redoCount, setRedoCount] = useState(0);
+
+  useEffect(() => {
+    setUndoCount(undoStackRef.current.length);
+    setRedoCount(redoStackRef.current.length);
+  }, [tabs]);
 
   const getItemRectInContainer = useCallback((itemId: string, fallbackItem: BoardItemType) => {
     const drag = dragOffsets[itemId];
@@ -432,32 +462,88 @@ export default function Board({ boardId }: { boardId: string }) {
     [boardId, user?.sessionToken]
   );
 
+  const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string) => {
+    const stack = undoStackRef.current;
+    const last = stack[stack.length - 1];
+    const now = Date.now();
+    const afterActiveTabId = nextActiveTabId ?? activeTabId;
+    // Coalesce: keep extending the most recent entry while the same target is
+    // being edited within the window. Reference equality on the "after" state
+    // guarantees we never merge across a remote realtime apply.
+    if (
+      last &&
+      last.key === key &&
+      now - last.time < COALESCE_MS &&
+      last.after.tabs === prevTabs
+    ) {
+      last.after = { tabs: nextTabs, activeTabId: afterActiveTabId };
+      last.time = now;
+      return;
+    }
+    // New history branch — anything redoable is discarded.
+    redoStackRef.current = [];
+    stack.push({
+      key,
+      time: now,
+      before: { tabs: structuredClone(prevTabs), activeTabId },
+      after: { tabs: nextTabs, activeTabId: afterActiveTabId },
+    });
+    if (stack.length > HISTORY_LIMIT) stack.shift();
+  }, [activeTabId]);
+
+  const handleUndo = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    redoStackRef.current.push(entry);
+    setTabs(entry.before.tabs);
+    setActiveTabId(entry.before.activeTabId);
+    persistBoardState(entry.before.tabs);
+    setSelectedItemId(null);
+    setFocusedItemId(prev =>
+      prev && entry.before.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
+    );
+  }, [persistBoardState]);
+
+  const handleRedo = useCallback(() => {
+    const entry = redoStackRef.current.pop();
+    if (!entry) return;
+    undoStackRef.current.push(entry);
+    setTabs(entry.after.tabs);
+    setActiveTabId(entry.after.activeTabId);
+    persistBoardState(entry.after.tabs);
+    setSelectedItemId(null);
+    setFocusedItemId(prev =>
+      prev && entry.after.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
+    );
+  }, [persistBoardState]);
+
   const saveState = useCallback(
-    (newItems: BoardItemType[], newConns: Connection[], newAnnotations?: BoardAnnotation[]) => {
-      setTabs((prevTabs) => {
-        const targetId = activeTabId || (prevTabs[0]?.id ?? 'default-tab');
-        const updatedTabs = prevTabs.map((t) => {
-          if (t.id === targetId) {
-            return {
-              ...t,
-              items: newItems,
-              connections: newConns,
-              annotations: newAnnotations !== undefined ? newAnnotations : t.annotations || [],
-            };
-          }
-          return t;
-        });
-
-        // Keep link-token title snapshots in sync with item titles so the UI
-        // (and the persisted copy) reflect renames immediately.
-        const syncedTabs = syncLinkTitles(updatedTabs);
-
-        // Trigger asynchronous persistence
-        persistBoardState(syncedTabs);
-        return syncedTabs;
+    (newItems: BoardItemType[], newConns: Connection[], newAnnotations?: BoardAnnotation[], historyKey?: string) => {
+      const targetId = activeTabId || (tabs[0]?.id ?? 'default-tab');
+      const updatedTabs = tabs.map((t) => {
+        if (t.id === targetId) {
+          return {
+            ...t,
+            items: newItems,
+            connections: newConns,
+            annotations: newAnnotations !== undefined ? newAnnotations : t.annotations || [],
+          };
+        }
+        return t;
       });
+
+      // Keep link-token title snapshots in sync with item titles so the UI
+      // (and the persisted copy) reflect renames immediately.
+      const syncedTabs = syncLinkTitles(updatedTabs);
+
+      // Record the before/after pair for undo/redo (before the state lands).
+      recordHistory(tabs, syncedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`);
+
+      setTabs(syncedTabs);
+      // Trigger asynchronous persistence
+      persistBoardState(syncedTabs);
     },
-    [activeTabId, persistBoardState]
+    [tabs, activeTabId, recordHistory, persistBoardState]
   );
 
   const handleUpdateAnnotation = useCallback(
@@ -468,7 +554,7 @@ export default function Board({ boardId }: { boardId: string }) {
         return; // not allowed to edit
       }
       const newAnns = currentAnns.map((a) => (a.id === updated.id ? updated : a));
-      saveState(items, connections, newAnns);
+      saveState(items, connections, newAnns, `ann:${updated.id}`);
     },
     [activeTab.annotations, items, connections, saveState, user]
   );
@@ -491,7 +577,7 @@ export default function Board({ boardId }: { boardId: string }) {
         return; // not allowed to delete
       }
       const newAnns = currentAnns.filter((a) => a.id !== id);
-      saveState(items, connections, newAnns);
+      saveState(items, connections, newAnns, `del-ann:${id}`);
     },
     [activeTab.annotations, items, connections, saveState, user]
   );
@@ -514,11 +600,12 @@ export default function Board({ boardId }: { boardId: string }) {
   };
 
   const saveFullTabsState = useCallback(
-    (updatedTabs: BoardTab[]) => {
+    (updatedTabs: BoardTab[], historyKey?: string, nextActiveTabId?: string) => {
+      recordHistory(tabs, updatedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`, nextActiveTabId);
       setTabs(updatedTabs);
       persistBoardState(updatedTabs);
     },
-    [persistBoardState]
+    [tabs, recordHistory, persistBoardState]
   );
 
   const handleAddTab = useCallback(() => {
@@ -531,32 +618,33 @@ export default function Board({ boardId }: { boardId: string }) {
     };
     const updatedTabs = [...tabs, newTab];
     setActiveTabId(newTab.id);
-    saveFullTabsState(updatedTabs);
+    saveFullTabsState(updatedTabs, undefined, newTab.id);
   }, [tabs, saveFullTabsState]);
 
   const handleRenameTab = useCallback((tabId: string, newName: string) => {
     const updatedTabs = tabs.map(t => t.id === tabId ? { ...t, name: newName } : t);
-    saveFullTabsState(updatedTabs);
+    saveFullTabsState(updatedTabs, `tab-rename:${tabId}`);
   }, [tabs, saveFullTabsState]);
 
   const handleChangeTabColor = useCallback((tabId: string, newColor: string) => {
     const updatedTabs = tabs.map(t => t.id === tabId ? { ...t, color: newColor } : t);
-    saveFullTabsState(updatedTabs);
+    saveFullTabsState(updatedTabs, `tab-color:${tabId}`);
   }, [tabs, saveFullTabsState]);
 
   const handleReorderTabs = useCallback((reorderedTabs: BoardTab[]) => {
-    saveFullTabsState(reorderedTabs);
+    saveFullTabsState(reorderedTabs, 'tab-reorder');
   }, [saveFullTabsState]);
 
   const handleDeleteTab = useCallback((tabId: string) => {
     if (tabs.length <= 1) return;
     const updatedTabs = tabs.filter(t => t.id !== tabId);
+    const nextActiveTabId = activeTabId === tabId
+      ? updatedTabs[Math.max(0, tabs.findIndex(t => t.id === tabId) - 1)].id
+      : activeTabId;
     if (activeTabId === tabId) {
-      const deletedIndex = tabs.findIndex(t => t.id === tabId);
-      const newActiveIndex = Math.max(0, deletedIndex - 1);
-      setActiveTabId(updatedTabs[newActiveIndex].id);
+      setActiveTabId(nextActiveTabId);
     }
-    saveFullTabsState(updatedTabs);
+    saveFullTabsState(updatedTabs, `tab-del:${tabId}`, nextActiveTabId);
   }, [tabs, activeTabId, saveFullTabsState]);
 
   const handleDragMove = useCallback((id: string, dx: number, dy: number) => {
@@ -810,7 +898,7 @@ export default function Board({ boardId }: { boardId: string }) {
         height: geom.height ?? ann.height,
       };
     });
-    saveState(newItems, connections, annChanged ? newAnns : undefined);
+    saveState(newItems, connections, annChanged ? newAnns : undefined, `item:${itemToApply.id}`);
   }, [items, user, activeTab.annotations, dragOffsets, itemDimensions, connections, saveState]);
 
   const handleDeleteItem = useCallback((id: string) => {
@@ -839,7 +927,7 @@ export default function Board({ boardId }: { boardId: string }) {
         pins: hasRemainingPins ? updatedPins : undefined,
       };
     });
-    saveState(newItems, newConns, annChanged ? newAnns : undefined);
+    saveState(newItems, newConns, annChanged ? newAnns : undefined, `del-item:${id}`);
   }, [items, user, connections, activeTab.annotations, dragOffsets, itemDimensions, saveState]);
 
   const handleItemClick = useCallback((id: string) => {
@@ -897,6 +985,21 @@ export default function Board({ boardId }: { boardId: string }) {
   useEffect(() => {
     latestKeyHandlerRef.current = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
+
+      // Undo/redo — handled before the form-field guard so Ctrl+Z works
+      // mid-edit (controlled inputs have no reliable native undo). The Tiptap
+      // rich text editor keeps its own undo history, so it's exempt.
+      const isUndo = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z';
+      const isRedo = (e.ctrlKey || e.metaKey) && !e.altKey &&
+        (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey));
+      if (isUndo || isRedo) {
+        if (showMembersModal || showUserSettingsModal) return;
+        if (activeEl && (activeEl as HTMLElement).isContentEditable) return;
+        e.preventDefault();
+        if (isUndo) handleUndo(); else handleRedo();
+        return;
+      }
+
       // Only true typing contexts block shortcuts — a lingering focused button
       // (e.g. after clicking the sidebar "Add" button) must NOT disable them.
       const isFormField =
@@ -1070,6 +1173,10 @@ export default function Board({ boardId }: { boardId: string }) {
         onOpenMembersModal={() => setShowMembersModal(true)}
         onOpenSettingsModal={() => setShowUserSettingsModal(true)}
         onOpenShortcutsHelp={() => setShowShortcutsHelp(true)}
+        canUndo={undoCount > 0}
+        canRedo={redoCount > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
       <TabBar
         tabs={tabs}
@@ -1322,7 +1429,7 @@ export default function Board({ boardId }: { boardId: string }) {
                                 const newLabel = e.target.value;
                                 setEditingConnectionLabel(newLabel);
                                 const newConns = connections.map(c => c.id === conn.id ? { ...c, label: newLabel } : c);
-                                saveState(items, newConns);
+                                saveState(items, newConns, undefined, `conn:${conn.id}`);
                               }}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
@@ -1352,7 +1459,7 @@ export default function Board({ boardId }: { boardId: string }) {
                                   type="button"
                                   onClick={() => {
                                     const newConns = connections.map(c => c.id === conn.id ? { ...c, style: s.id } : c);
-                                    saveState(items, newConns);
+                                    saveState(items, newConns, undefined, `conn:${conn.id}`);
                                   }}
                                   className={`flex flex-col items-center justify-center p-1.5 rounded border text-xs font-bold transition-all cursor-pointer ${
                                     conn.style === s.id
@@ -1389,7 +1496,7 @@ export default function Board({ boardId }: { boardId: string }) {
                                   type="button"
                                   onClick={() => {
                                     const newConns = connections.map(c => c.id === conn.id ? { ...c, width: w.px } : c);
-                                    saveState(items, newConns);
+                                    saveState(items, newConns, undefined, `conn:${conn.id}`);
                                   }}
                                   className={`flex flex-col items-center justify-center p-1.5 rounded border text-xs font-bold transition-all cursor-pointer ${
                                     (conn.width || 3) === w.px
@@ -1433,7 +1540,7 @@ export default function Board({ boardId }: { boardId: string }) {
                                   style={{ backgroundColor: preset.hex }}
                                   onClick={() => {
                                     const newConns = connections.map(c => c.id === conn.id ? { ...c, color: preset.hex } : c);
-                                    saveState(items, newConns);
+                                    saveState(items, newConns, undefined, `conn:${conn.id}`);
                                   }}
                                   className={`w-6 h-6 rounded border border-black/20 shadow-xs hover:scale-110 transition-transform cursor-pointer ${
                                     (conn.color || '#9ca3af').toLowerCase() === preset.hex.toLowerCase()
@@ -1455,7 +1562,7 @@ export default function Board({ boardId }: { boardId: string }) {
                                 value={conn.color || '#9ca3af'}
                                 onChange={e => {
                                   const newConns = connections.map(c => c.id === conn.id ? { ...c, color: e.target.value } : c);
-                                  saveState(items, newConns);
+                                  saveState(items, newConns, undefined, `conn:${conn.id}`);
                                 }}
                                 className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                                 title="Custom color picker"
@@ -1469,7 +1576,7 @@ export default function Board({ boardId }: { boardId: string }) {
                               type="button"
                               onClick={() => {
                                 const newConns = connections.filter(c => c.id !== conn.id);
-                                saveState(items, newConns);
+                                saveState(items, newConns, undefined, `del-conn:${conn.id}`);
                                 setEditingConnectionId(null);
                               }}
                               className="px-2.5 py-1 bg-red-900/40 hover:bg-red-800/80 text-red-200 border border-red-700/50 text-[11px] font-bold rounded flex items-center gap-1 transition-colors cursor-pointer"
@@ -1555,7 +1662,7 @@ export default function Board({ boardId }: { boardId: string }) {
                             onClick={(e) => {
                               e.stopPropagation();
                               const newConns = connections.filter(c => c.id !== conn.id);
-                              saveState(items, newConns);
+                              saveState(items, newConns, undefined, `del-conn:${conn.id}`);
                             }}
                             className="opacity-0 group-hover:opacity-100 hover:text-red-600 transition-opacity p-0.5 cursor-pointer"
                             title="Delete connection"
