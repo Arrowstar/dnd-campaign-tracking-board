@@ -55,10 +55,18 @@ export function scrubTabsForUser(tabs: BoardTab[], user: Viewer): BoardTab[] {
  * non-DM clients can never overwrite, blank out, or delete content they cannot
  * see:
  *  - Non-owner edits of another user's items are reduced to comments only.
+ *  - Ownership can only be reassigned by a DM, and only to an existing board
+ *    member (when `memberIds` is provided); any other attempt is reverted to
+ *    the stored owner.
  *  - Fields the user cannot view are restored from the stored item (and
  *    re-appended if the user tried to delete them).
  */
-export function mergeTabsForSave(stored: BoardTab[], incoming: BoardTab[], user: Viewer): BoardTab[] {
+export function mergeTabsForSave(
+  stored: BoardTab[],
+  incoming: BoardTab[],
+  user: Viewer,
+  memberIds?: Set<string>
+): BoardTab[] {
   return incoming.map((incomingTab) => {
     const storedTab = stored.find((t) => t.id === incomingTab.id);
     if (!storedTab) return incomingTab;
@@ -71,6 +79,18 @@ export function mergeTabsForSave(stored: BoardTab[], incoming: BoardTab[], user:
         // Non-owner, non-DM: only comments may change.
         if (user.role !== 'dm' && stItem.ownerId !== user.id) {
           return { ...stItem, comments: inItem.comments ?? stItem.comments };
+        }
+
+        // Players can never reassign ownership — not even of their own items.
+        if (user.role !== 'dm') {
+          inItem = { ...inItem, ownerId: stItem.ownerId, ownerName: stItem.ownerName };
+        }
+
+        // DM ownership changes must target an existing board member.
+        if (user.role === 'dm' && memberIds && inItem.ownerId !== stItem.ownerId) {
+          if (!inItem.ownerId || !memberIds.has(inItem.ownerId)) {
+            inItem = { ...inItem, ownerId: stItem.ownerId, ownerName: stItem.ownerName };
+          }
         }
 
         // Owner or DM: take the incoming item, but restore hidden fields and

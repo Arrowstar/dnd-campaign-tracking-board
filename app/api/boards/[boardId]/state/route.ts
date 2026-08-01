@@ -69,7 +69,9 @@ export async function POST(
       // content they are not permitted to see (per-field visibility, item ownership).
       const storedRows = await sql`SELECT tabs FROM boards WHERE id = ${boardId} LIMIT 1`;
       const storedTabs: any[] = storedRows[0]?.tabs || [];
-      const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role });
+      // Owners may only be reassigned to existing board members.
+      const memberIds = new Set(Object.keys(rows[0].members || {}));
+      const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role }, memberIds);
       // Keep link-token title snapshots in sync with item titles.
       const synced = syncLinkTitles(merged);
       const updated = await sql`

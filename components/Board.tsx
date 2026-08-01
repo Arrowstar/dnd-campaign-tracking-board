@@ -72,6 +72,8 @@ export default function Board({ boardId }: { boardId: string }) {
 
   // Board member display names (for member-select field widgets)
   const [memberNames, setMemberNames] = useState<string[]>([]);
+  // Full member records (for the DM owner picker in the focus drawer)
+  const [boardMembers, setBoardMembers] = useState<{ id: string; displayName: string }[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -80,7 +82,10 @@ export default function Board({ boardId }: { boardId: string }) {
     })
       .then(res => res.json())
       .then(data => {
-        if (data.members) setMemberNames((data.members as { displayName: string }[]).map(m => m.displayName));
+        if (data.members) {
+          setMemberNames((data.members as { displayName: string }[]).map(m => m.displayName));
+          setBoardMembers((data.members as { id: string; displayName: string }[]).map(m => ({ id: m.id, displayName: m.displayName })));
+        }
       })
       .catch(() => { /* member options are non-critical; field widgets fall back to Custom */ });
   }, [boardId, user]);
@@ -1754,6 +1759,7 @@ export default function Board({ boardId }: { boardId: string }) {
               onClose={handleCloseFocus}
               onScrollToItem={handleScrollToItem}
               memberNames={memberNames}
+              members={boardMembers}
               width={drawerWidth}
               onWidthChange={setDrawerWidth}
             />

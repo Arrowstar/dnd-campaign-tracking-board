@@ -39,6 +39,8 @@ interface FocusDrawerProps {
   typeLabel: string;
   /** Board member display names, used for member-select widgets. */
   memberNames?: string[];
+  /** Board member records, used for the DM owner picker. */
+  members?: { id: string; displayName: string }[];
   onUpdate: (item: BoardItemType) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -80,6 +82,7 @@ export default function FocusDrawer({
   fieldDefs,
   typeLabel,
   memberNames,
+  members,
   onUpdate,
   onDelete,
   onClose,
@@ -92,6 +95,7 @@ export default function FocusDrawer({
   const [isWritingComment, setIsWritingComment] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
+  const [showOwnerMenu, setShowOwnerMenu] = useState(false);
 
   const canEdit = !item || item.ownerId === user.id || user.role === 'dm';
   const itemColor = item?.color || '#423D38';
@@ -112,9 +116,10 @@ export default function FocusDrawer({
       setActiveTab('content');
       setShowDeleteConfirm(false);
       setIsWritingComment(false);
-      setCommentText('');
-      setShowVisibilityMenu(false);
-    }
+    setCommentText('');
+    setShowVisibilityMenu(false);
+    setShowOwnerMenu(false);
+  }
   }
 
   // ── Resize handle ──────────────────────────────────────────────────────────
@@ -235,7 +240,44 @@ export default function FocusDrawer({
           {/* Row 2: owner, date, visibility */}
           <div className="flex items-center gap-2 text-[11px] text-[#A89F91]">
             <UserIcon size={11} className="text-[#B58D3D] flex-shrink-0" />
-            <span className="font-semibold text-[#C9C0B1]">{ownerName}</span>
+
+            {/* Owner — DM can reassign to any board member */}
+            {user.role === 'dm' ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowOwnerMenu(!showOwnerMenu); }}
+                  className="flex items-center gap-1 px-1.5 py-0.5 -mx-1.5 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Change owner"
+                >
+                  <span className="font-semibold text-[#C9C0B1]">{ownerName}</span>
+                  <ChevronDown size={10} className="opacity-70" />
+                </button>
+                {showOwnerMenu && (
+                  <div className="absolute top-full left-0 mt-1 bg-[#2C2824] border border-[#B58D3D]/40 rounded-lg shadow-2xl py-1 z-50 w-48 max-h-64 overflow-y-auto">
+                    {members && members.length > 0 ? (
+                      members.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => { onUpdate({ ...item, ownerId: m.id, ownerName: m.displayName }); setShowOwnerMenu(false); }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/10 transition-colors cursor-pointer ${item.ownerId === m.id ? 'text-[#B58D3D]' : 'text-[#C9C0B1]'}`}
+                        >
+                          <UserIcon size={11} className="flex-shrink-0 opacity-60" />
+                          <span className="truncate">{m.displayName}</span>
+                          {item.ownerId === m.id && <Check size={11} className="ml-auto flex-shrink-0" />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-1.5 text-xs text-[#8C7B6E] italic">No members yet</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="font-semibold text-[#C9C0B1]">{ownerName}</span>
+            )}
+
             <span className="opacity-60">·</span>
             <span className="opacity-70">{item.date}</span>
 
