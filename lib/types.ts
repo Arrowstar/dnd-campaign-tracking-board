@@ -43,7 +43,7 @@ export type ItemField = {
   visibility?: Visibility;
 };
 
-export type PreviewFieldMode = 'auto' | 'hero' | 'thumb' | 'compact' | 'expanded';
+export type PreviewFieldMode = 'auto' | 'hero' | 'thumb' | 'natural' | 'fill' | 'compact' | 'expanded';
 
 export type PreviewFieldSlot = {
   /** FieldDef id (or '__image_content__' sentinel for image-type items). */

@@ -570,6 +570,8 @@ const STYLE_OPTIONS: Record<'image' | 'text' | 'structured', { value: PreviewFie
     { value: 'auto', label: 'Auto', title: 'Full-width banner when full width, thumbnail when half' },
     { value: 'hero', label: 'Hero', title: 'Full-width banner image' },
     { value: 'thumb', label: 'Thumb', title: 'Small square thumbnail that flows inline' },
+    { value: 'natural', label: 'Natural', title: 'Full image at its natural aspect ratio — no pixel height cap' },
+    { value: 'fill', label: 'Fill', title: 'Expand to fill the whole card body (crops edges to keep it full-bleed)' },
   ],
   text: [
     { value: 'auto', label: 'Auto', title: 'Compact two-line preview' },
@@ -934,12 +936,13 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, canEdit, drag, 
   }
 
   if (fieldType === 'image') {
+    const imageBlockHeight = mode === 'thumb' ? 'h-4' : mode === 'natural' ? 'h-10' : mode === 'fill' ? 'h-12' : 'h-8';
     const isThumb = mode === 'thumb';
     return (
       <div {...rootProps} className={rootClass}>
         <div className="flex flex-col gap-0.5 min-w-0">
           <span className="text-[7px] font-bold uppercase tracking-wide text-[#8C7B6E] truncate" title={label}>{label}</span>
-          <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${isThumb ? 'h-4' : 'h-8'}`}>
+          <div className={`flex items-center justify-center rounded bg-[#2C2824]/10 border border-[#D9D0C1] ${imageBlockHeight}`}>
             <ImageIcon size={isThumb ? 8 : 12} className="text-[#8C7B6E]" />
           </div>
         </div>
