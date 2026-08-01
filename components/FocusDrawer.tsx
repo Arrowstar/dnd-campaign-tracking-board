@@ -101,13 +101,20 @@ export default function FocusDrawer({
   const CurrentVisIcon = currentVisibility.icon;
 
   const [prevItemId, setPrevItemId] = useState<string | null>(null);
-  if (item?.id !== prevItemId) {
-    setPrevItemId(item?.id || null);
-    setActiveTab('content');
-    setShowDeleteConfirm(false);
-    setIsWritingComment(false);
-    setCommentText('');
-    setShowVisibilityMenu(false);
+  // Reset transient drawer UI when switching to a different item. Compared
+  // against the item's id OR null (deleted items) so the state update only
+  // fires once per transition — otherwise a null item would re-trigger the
+  // condition on every render and loop forever (React "too many re-renders").
+  const currentItemId = item?.id ?? null;
+  if (currentItemId !== prevItemId) {
+    setPrevItemId(currentItemId);
+    if (item) {
+      setActiveTab('content');
+      setShowDeleteConfirm(false);
+      setIsWritingComment(false);
+      setCommentText('');
+      setShowVisibilityMenu(false);
+    }
   }
 
   // ── Resize handle ──────────────────────────────────────────────────────────

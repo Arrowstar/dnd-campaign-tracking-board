@@ -859,13 +859,19 @@ export default function Board({ boardId }: { boardId: string }) {
   // ── Global keyboard shortcuts ───────────────────────────────────────────────
   // Operate on the selected board item (click a card to select it). Keys are
   // ignored while typing in inputs/editors or when a modal is open.
-  useEffect(() => {
-    const isTypingTarget = (el: Element | null) =>
-      !!el &&
-      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
-       el.tagName === 'BUTTON' || el.tagName === 'A' || (el as HTMLElement).isContentEditable);
+  //
+  // The listener is registered ONCE and dispatches to the latest closure via a
+  // ref, so shortcuts always see the current selection/handlers regardless of
+  // render timing (no stale-closure misses).
+  const latestKeyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
 
-    const handleKeyDown = (e: KeyboardEvent) => {
+  useEffect(() => {
+    latestKeyHandlerRef.current = (e: KeyboardEvent) => {
+      const isTypingTarget = (el: Element | null) =>
+        !!el &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
+         el.tagName === 'BUTTON' || el.tagName === 'A' || (el as HTMLElement).isContentEditable);
+
       if (isTypingTarget(document.activeElement)) return;
       if (showMembersModal || showUserSettingsModal) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -875,6 +881,9 @@ export default function Board({ boardId }: { boardId: string }) {
         case 'Backspace':
           if (selectedItemId) {
             e.preventDefault();
+            // If the deleted item is the one open in the focus drawer, close the
+            // drawer too — otherwise FocusDrawer renders with a null item.
+            if (focusedItemId === selectedItemId) setFocusedItemId(null);
             handleDeleteItem(selectedItemId);
             setSelectedItemId(null);
           }
@@ -923,10 +932,13 @@ export default function Board({ boardId }: { boardId: string }) {
           break;
       }
     };
+  });
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedItemId, items, showMembersModal, showUserSettingsModal, handleDeleteItem, handleUpdateItem, handleOpenFocus, handleCloseFocus, handleFitView]);
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => latestKeyHandlerRef.current(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   const handleDragStartItem = useCallback(() => setIsDraggingItem(true), []);
 
