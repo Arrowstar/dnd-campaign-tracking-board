@@ -106,6 +106,69 @@ export default function Board({ boardId }: { boardId: string }) {
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
   const [itemDimensions, setItemDimensions] = useState<Record<string, { width: number; height: number }>>({});
 
+  const getViewportSize = () => {
+    const boardContainer = document.querySelector('.absolute.inset-0.top-16') as HTMLElement | null;
+    return {
+      width: boardContainer ? boardContainer.clientWidth : (typeof window !== 'undefined' ? window.innerWidth : 1200),
+      height: boardContainer ? boardContainer.clientHeight : (typeof window !== 'undefined' ? (window.innerHeight - 64) : 800),
+    };
+  };
+
+  // Pure (DOM-independent) fit computation for a tab's items, so fit
+  // transforms can be precomputed at load even for tabs that aren't rendered.
+  const computeFitForTab = useCallback((tab: BoardTab, viewportW: number, viewportH: number) => {
+    const visibleItems = (tab.items || []).filter(i => {
+      if (i.visibility === 'dm' && user?.role !== 'dm' && i.ownerId !== user?.id) return false;
+      if (i.visibility === 'owner' && i.ownerId !== user?.id) return false;
+      return true;
+    });
+
+    if (visibleItems.length === 0) {
+      const targetScale = 1;
+      return {
+        positionX: viewportW / 2 - 2000 * targetScale,
+        positionY: viewportH / 2 - 2000 * targetScale,
+        scale: targetScale,
+      };
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    visibleItems.forEach(item => {
+      const itemW = itemDimensions[item.id]?.width || item.width || 300;
+      const itemH = itemDimensions[item.id]?.height || item.height || 200;
+      if (item.x < minX) minX = item.x;
+      if (item.x + itemW > maxX) maxX = item.x + itemW;
+      if (item.y < minY) minY = item.y;
+      if (item.y + itemH > maxY) maxY = item.y + itemH;
+    });
+
+    const padding = 100; // px
+    minX -= padding;
+    maxX += padding;
+    minY -= padding;
+    maxY += padding;
+
+    const boxW = Math.max(300, maxX - minX);
+    const boxH = Math.max(300, maxY - minY);
+
+    const scaleX = viewportW / boxW;
+    const scaleY = viewportH / boxH;
+    const targetScale = Math.max(0.1, Math.min(1.5, Math.min(scaleX, scaleY)));
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    return {
+      positionX: viewportW / 2 - centerX * targetScale,
+      positionY: viewportH / 2 - centerY * targetScale,
+      scale: targetScale,
+    };
+  }, [user, itemDimensions]);
+
   // Annotation Tool State
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [activeAnnColor, setActiveAnnColor] = useState<string>('#EF4444');
@@ -151,7 +214,11 @@ export default function Board({ boardId }: { boardId: string }) {
     scale: 1
   });
   const setTransformRef = useRef<((x: number, y: number, scale: number, animTime?: number) => void) | null>(null);
-  const fitViewRef = useRef<() => void>(() => {});
+  // Per-tab view memory: every tab stores its own transform. On first view a
+  // tab shows its fit transform (precomputed once when the board loads for all
+  // tabs); afterwards it keeps whatever view/zoom/pan the user left it with.
+  const [tabViews, setTabViews] = useState<Record<string, { positionX: number; positionY: number; scale: number }>>({});
+  const tabViewedRef = useRef<Set<string>>(new Set());
   const zoomInRef = useRef<(() => void) | null>(null);
   const zoomOutRef = useRef<(() => void) | null>(null);
   const resetTransformRef = useRef<(() => void) | null>(null);
@@ -159,6 +226,26 @@ export default function Board({ boardId }: { boardId: string }) {
   // Viewport-level pan offset (canvas coordinates -> screen coordinates),
   // mirrored from the TransformWrapper so the annotation layer can match it.
   const [viewPan, setViewPan] = useState<{ positionX: number; positionY: number }>({ positionX: 0, positionY: 0 });
+
+  // Apply the view stored for a tab (its fit on first view, its last
+  // view/zoom/pan on revisits). Falls back to a live fit if none is stored.
+  const applyTabView = useCallback((tabId: string) => {
+    if (!setTransformRef.current) return;
+    const stored = tabViews[tabId];
+    if (stored) {
+      const anim = tabViewedRef.current.has(tabId) ? 0 : 250;
+      tabViewedRef.current.add(tabId);
+      setTransformRef.current(stored.positionX, stored.positionY, stored.scale, anim);
+    } else {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      const vp = getViewportSize();
+      const fit = computeFitForTab(tab, vp.width, vp.height);
+      setTabViews(prev => ({ ...prev, [tabId]: fit }));
+      tabViewedRef.current.add(tabId);
+      setTransformRef.current(fit.positionX, fit.positionY, fit.scale, 250);
+    }
+  }, [tabs, tabViews, computeFitForTab]);
 
   // Revision of the board state whose full payload we last applied locally.
   // The realtime poller only downloads the full board when this changes.
@@ -313,16 +400,30 @@ export default function Board({ boardId }: { boardId: string }) {
       .catch(err => console.error('Failed to load board:', err));
   }, [boardId]);
 
-  // Fit view on initial board entry so everything on the active tab is visible.
+  // On initial board entry, precompute the fit transform for EVERY tab (once,
+  // immediately) and apply the active tab's fit. Later tab switches only apply
+  // these stored views — never recompute — and revisits keep the user's last view.
   const didInitialFitRef = useRef(false);
   useEffect(() => {
     if (!user || didInitialFitRef.current) return;
     const t = setTimeout(() => {
       didInitialFitRef.current = true;
-      fitViewRef.current();
+      const vp = getViewportSize();
+      const fits: Record<string, { positionX: number; positionY: number; scale: number }> = {};
+      tabs.forEach(tab => {
+        // Overwrite unconditionally: onTransform may have already stored the
+        // TransformWrapper's centerOnInit view for the active tab.
+        fits[tab.id] = computeFitForTab(tab, vp.width, vp.height);
+      });
+      setTabViews(prev => ({ ...prev, ...fits }));
+      const activeView = fits[activeTabId];
+      if (activeView && setTransformRef.current) {
+        tabViewedRef.current.add(activeTabId);
+        setTransformRef.current(activeView.positionX, activeView.positionY, activeView.scale, 300);
+      }
     }, 50);
     return () => clearTimeout(t);
-  }, [user]);
+  }, [user, tabs, activeTabId, computeFitForTab]);
 
   // Real-time sync via revision polling: a cheap revision request every few
   // seconds tells us if the board changed elsewhere; the full (per-user
@@ -636,9 +737,18 @@ export default function Board({ boardId }: { boardId: string }) {
     const updatedTabs = [...tabs, newTab];
     setActiveTabId(newTab.id);
     saveFullTabsState(updatedTabs, undefined, newTab.id);
-    // Fit the new (empty) tab to the canvas origin
-    setTimeout(() => fitViewRef.current(), 50);
-  }, [tabs, saveFullTabsState]);
+    // Store the new tab's view (empty-tab fit centered on the canvas origin)
+    // and apply it on its first view.
+    const vp = getViewportSize();
+    const fit = computeFitForTab(newTab, vp.width, vp.height);
+    setTabViews(prev => ({ ...prev, [newTab.id]: fit }));
+    tabViewedRef.current.add(newTab.id);
+    setTimeout(() => {
+      if (setTransformRef.current) {
+        setTransformRef.current(fit.positionX, fit.positionY, fit.scale, 250);
+      }
+    }, 50);
+  }, [tabs, saveFullTabsState, computeFitForTab]);
 
   const handleRenameTab = useCallback((tabId: string, newName: string) => {
     const updatedTabs = tabs.map(t => t.id === tabId ? { ...t, name: newName } : t);
@@ -662,9 +772,11 @@ export default function Board({ boardId }: { boardId: string }) {
       : activeTabId;
     if (activeTabId === tabId) {
       setActiveTabId(nextActiveTabId);
+      // Show the newly active tab's stored view instead of the deleted tab's
+      setTimeout(() => applyTabView(nextActiveTabId), 50);
     }
     saveFullTabsState(updatedTabs, `tab-del:${tabId}`, nextActiveTabId);
-  }, [tabs, activeTabId, saveFullTabsState]);
+  }, [tabs, activeTabId, saveFullTabsState, applyTabView]);
 
   const handleDragMove = useCallback((id: string, dx: number, dy: number) => {
     setDragOffsets(prev => ({ ...prev, [id]: { x: dx, y: dy } }));
@@ -882,14 +994,6 @@ export default function Board({ boardId }: { boardId: string }) {
 
     setTransform(targetX, targetY, targetScale, 300);
   }, [user, items, itemDimensions]);
-
-  // Keep a stable ref to the latest fit-view function so it can be triggered
-  // from effects/handlers without stale-closure issues.
-  useEffect(() => {
-    fitViewRef.current = () => {
-      if (setTransformRef.current) handleFitView(setTransformRef.current);
-    };
-  }, [handleFitView]);
 
   const handleUpdateItem = useCallback((updatedItem: BoardItemType) => {
     const existing = items.find(i => i.id === updatedItem.id);
@@ -1209,10 +1313,21 @@ export default function Board({ boardId }: { boardId: string }) {
         tabs={tabs}
         activeTabId={activeTabId}
         onSelectTab={(tabId) => {
+          if (tabId === activeTabId) return;
+          // Save the leaving tab's current view so it can be restored on revisit
+          setTabViews(prev => ({
+            ...prev,
+            [activeTabId]: {
+              positionX: transformRef.current.positionX,
+              positionY: transformRef.current.positionY,
+              scale: transformRef.current.scale,
+            },
+          }));
           setSelectedItemId(null);
           setActiveTabId(tabId);
-          // Fit view on the newly entered tab so all its items are visible
-          setTimeout(() => fitViewRef.current(), 50);
+          // Apply the tab's stored view — its precomputed fit on first view,
+          // its last view/zoom/pan on revisits. Never recomputes a fit here.
+          setTimeout(() => applyTabView(tabId), 50);
         }}
         onAddTab={handleAddTab}
         onRenameTab={handleRenameTab}
