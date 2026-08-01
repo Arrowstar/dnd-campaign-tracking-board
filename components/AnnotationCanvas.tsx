@@ -27,6 +27,9 @@ interface AnnotationCanvasProps {
   onUpdateAnnotation: (updated: BoardAnnotation) => void;
   onAddAnnotation: (newAnn: BoardAnnotation) => void;
   onDeleteAnnotation: (id: string) => void;
+  /** Currently selected annotation (owned by Board so keyboard shortcuts can act on it) */
+  selectedAnnId: string | null;
+  onSelectAnnotation: (id: string | null) => void;
   zoomScale: number;
   positionX: number;
   positionY: number;
@@ -48,11 +51,12 @@ export default function AnnotationCanvas({
   onUpdateAnnotation,
   onAddAnnotation,
   onDeleteAnnotation,
+  selectedAnnId,
+  onSelectAnnotation,
   zoomScale,
   positionX,
   positionY,
 }: AnnotationCanvasProps) {
-  const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null);
   const [showFullInspector, setShowFullInspector] = useState<boolean>(false);
   const [editingTextAnnId, setEditingTextAnnId] = useState<string | null>(null);
 
@@ -116,9 +120,9 @@ export default function AnnotationCanvas({
 
   // Callback to initiate dragging a pin handle (e.g. from Inspector)
   const handleStartDragPinHandle = useCallback((annId: string, handleIndex: number, e: React.PointerEvent) => {
-    setSelectedAnnId(annId);
+    onSelectAnnotation(annId);
     setDraggingHandle({ annId, handleIndex });
-  }, []);
+  }, [onSelectAnnotation]);
 
   // Global pointer listeners while dragging a pin handle or moving an annotation
   useEffect(() => {
@@ -181,7 +185,7 @@ export default function AnnotationCanvas({
   const handlePointerDownCanvas = (e: React.PointerEvent<SVGElement>) => {
     // Only trigger drawing if an annotation tool is active
     if (!activeTool || !activeTool.startsWith('ann_')) {
-      if (selectedAnnId) setSelectedAnnId(null);
+      if (selectedAnnId) onSelectAnnotation(null);
       return;
     }
 
@@ -462,7 +466,7 @@ export default function AnnotationCanvas({
       };
 
       onAddAnnotation(newAnn);
-      setSelectedAnnId(newAnn.id);
+      onSelectAnnotation(newAnn.id);
       if (setActiveTool) setActiveTool(null);
 
       setDrawingStart(null);
@@ -525,7 +529,7 @@ export default function AnnotationCanvas({
                       e.nativeEvent.stopPropagation();
                       e.nativeEvent.stopImmediatePropagation();
                     }
-                    setSelectedAnnId(ann.id);
+                    onSelectAnnotation(ann.id);
                     const coords = getCanvasCoords(e);
                     setMovingAnn({
                       annId: ann.id,
@@ -545,7 +549,7 @@ export default function AnnotationCanvas({
                   onClick={(e) => {
                     if (!canEdit(ann.id)) return;
                     e.stopPropagation();
-                    setSelectedAnnId(ann.id);
+                    onSelectAnnotation(ann.id);
                   }}
                 />
               )}
@@ -591,7 +595,7 @@ export default function AnnotationCanvas({
                           e.nativeEvent.stopPropagation();
                           e.nativeEvent.stopImmediatePropagation();
                         }
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                         const coords = getCanvasCoords(e);
                         setMovingAnn({
                           annId: ann.id,
@@ -611,7 +615,7 @@ export default function AnnotationCanvas({
                       onClick={(e) => {
                         if (!canEdit(ann.id)) return;
                         e.stopPropagation();
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                       }}
                     />
 
@@ -673,7 +677,7 @@ export default function AnnotationCanvas({
                           e.nativeEvent.stopPropagation();
                           e.nativeEvent.stopImmediatePropagation();
                         }
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                         const coords = getCanvasCoords(e);
                         setMovingAnn({
                           annId: ann.id,
@@ -693,7 +697,7 @@ export default function AnnotationCanvas({
                       onClick={(e) => {
                         if (!canEdit(ann.id)) return;
                         e.stopPropagation();
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                       }}
                     />
                   </g>
@@ -740,7 +744,7 @@ export default function AnnotationCanvas({
                           e.nativeEvent.stopPropagation();
                           e.nativeEvent.stopImmediatePropagation();
                         }
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                         const coords = getCanvasCoords(e);
                         setMovingAnn({
                           annId: ann.id,
@@ -760,7 +764,7 @@ export default function AnnotationCanvas({
                       onClick={(e) => {
                         if (!canEdit(ann.id)) return;
                         e.stopPropagation();
-                        setSelectedAnnId(ann.id);
+                        onSelectAnnotation(ann.id);
                       }}
                     />
                   </g>
@@ -790,7 +794,7 @@ export default function AnnotationCanvas({
                         e.nativeEvent.stopPropagation();
                         e.nativeEvent.stopImmediatePropagation();
                       }
-                      setSelectedAnnId(ann.id);
+                      onSelectAnnotation(ann.id);
                       const coords = getCanvasCoords(e);
                       setMovingAnn({
                         annId: ann.id,
@@ -810,7 +814,7 @@ export default function AnnotationCanvas({
                     onClick={(e) => {
                       if (!canEdit(ann.id)) return;
                       e.stopPropagation();
-                      setSelectedAnnId(ann.id);
+                      onSelectAnnotation(ann.id);
                     }}
                     onDoubleClick={(e) => {
                       if (!canEdit(ann.id)) return;
@@ -1268,13 +1272,13 @@ export default function AnnotationCanvas({
                 onMinimize={() => setShowFullInspector(false)}
                 onDelete={(id) => {
                   onDeleteAnnotation(id);
-                  setSelectedAnnId(null);
+                  onSelectAnnotation(null);
                   setMovingAnn(null);
                   setDraggingHandle(null);
                   setShowFullInspector(false);
                 }}
                 onClose={() => {
-                  setSelectedAnnId(null);
+                  onSelectAnnotation(null);
                   setMovingAnn(null);
                   setDraggingHandle(null);
                   setShowFullInspector(false);
@@ -1288,12 +1292,12 @@ export default function AnnotationCanvas({
                 onOpenFullInspector={() => setShowFullInspector(true)}
                 onDelete={(id) => {
                   onDeleteAnnotation(id);
-                  setSelectedAnnId(null);
+                  onSelectAnnotation(null);
                   setMovingAnn(null);
                   setDraggingHandle(null);
                 }}
                 onClose={() => {
-                  setSelectedAnnId(null);
+                  onSelectAnnotation(null);
                   setMovingAnn(null);
                   setDraggingHandle(null);
                 }}

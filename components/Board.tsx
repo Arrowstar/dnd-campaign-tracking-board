@@ -127,6 +127,9 @@ export default function Board({ boardId }: { boardId: string }) {
 
   // Keyboard-driven selection (Delete/Enter/arrow-key shortcuts operate on this)
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  // Annotation selection lifted from AnnotationCanvas so keyboard shortcuts can
+  // act on annotations too. Selecting one clears item selection (and vice versa).
+  const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null);
   
   // Transform state ref & zoom percentage display
   const boardContainerRef = useRef<HTMLDivElement>(null);
@@ -493,6 +496,23 @@ export default function Board({ boardId }: { boardId: string }) {
     [activeTab.annotations, items, connections, saveState, user]
   );
 
+  // Shift an annotation by (dx, dy) in canvas coordinates. Moves the raw
+  // anchor points AND any pin offsets, so pinned annotations move relative to
+  // the items they're attached to while unpinned ones translate freely.
+  const nudgeAnnotation = (ann: BoardAnnotation, dx: number, dy: number): BoardAnnotation => {
+    const pins = (ann.pins || []).map(p =>
+      p ? { ...p, offsetX: p.offsetX + dx, offsetY: p.offsetY + dy } : null
+    );
+    return {
+      ...ann,
+      x: ann.x + dx,
+      y: ann.y + dy,
+      x2: ann.x2 !== undefined ? ann.x2 + dx : ann.x2,
+      y2: ann.y2 !== undefined ? ann.y2 + dy : ann.y2,
+      pins: pins.length > 0 ? pins : undefined,
+    };
+  };
+
   const saveFullTabsState = useCallback(
     (updatedTabs: BoardTab[]) => {
       setTabs(updatedTabs);
@@ -846,6 +866,7 @@ export default function Board({ boardId }: { boardId: string }) {
     // When NOT in connection mode, clicking selects — keyboard shortcuts
     // (Delete, Enter, arrows) operate on the selection. Open focus via
     // double-click, the ExternalLink button, or pressing Enter.
+    setSelectedAnnId(null);
     setSelectedItemId(id);
   }, [isAddingConnection, connectionStart, connectionColor, connectionStyle, connectionWidth, items, connections, saveState]);
 
@@ -855,6 +876,13 @@ export default function Board({ boardId }: { boardId: string }) {
 
   const handleCloseFocus = useCallback(() => {
     setFocusedItemId(null);
+  }, []);
+
+  // Selecting an annotation deselects any selected board item (and vice versa),
+  // so keyboard shortcuts always act on the most recently selected object.
+  const handleSelectAnnotation = useCallback((id: string | null) => {
+    setSelectedAnnId(id);
+    if (id) setSelectedItemId(null);
   }, []);
 
   // ── Global keyboard shortcuts ───────────────────────────────────────────────
@@ -884,7 +912,11 @@ export default function Board({ boardId }: { boardId: string }) {
       switch (e.key) {
         case 'Delete':
         case 'Backspace':
-          if (selectedItemId) {
+          if (selectedAnnId) {
+            e.preventDefault();
+            handleDeleteAnnotation(selectedAnnId);
+            setSelectedAnnId(null);
+          } else if (selectedItemId) {
             e.preventDefault();
             // If the deleted item is the one open in the focus drawer, close the
             // drawer too — otherwise FocusDrawer renders with a null item.
@@ -894,6 +926,7 @@ export default function Board({ boardId }: { boardId: string }) {
           }
           break;
         case 'Escape':
+          setSelectedAnnId(null);
           setSelectedItemId(null);
           setIsAddingConnection(false);
           setConnectionStart(null);
@@ -911,13 +944,17 @@ export default function Board({ boardId }: { boardId: string }) {
         case 'ArrowDown':
         case 'ArrowLeft':
         case 'ArrowRight': {
-          const selected = items.find(i => i.id === selectedItemId);
-          if (selected) {
-            e.preventDefault();
-            const step = e.shiftKey ? 10 : 1;
-            const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-            const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-            handleUpdateItem({ ...selected, x: selected.x + dx, y: selected.y + dy });
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+          const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+
+          if (selectedAnnId) {
+            const ann = annotations.find(a => a.id === selectedAnnId);
+            if (ann) handleUpdateAnnotation(nudgeAnnotation(ann, dx, dy));
+          } else if (selectedItemId) {
+            const selected = items.find(i => i.id === selectedItemId);
+            if (selected) handleUpdateItem({ ...selected, x: selected.x + dx, y: selected.y + dy });
           }
           break;
         }
@@ -1145,6 +1182,7 @@ export default function Board({ boardId }: { boardId: string }) {
                   const target = e.target as HTMLElement;
                   if (target.closest('[data-item-root]')) return;
                   setSelectedItemId(null);
+                  setSelectedAnnId(null);
                 }}>
                   {/* Infinite Grid Background */}
                   <div 
@@ -1580,6 +1618,8 @@ export default function Board({ boardId }: { boardId: string }) {
                 onUpdateAnnotation={handleUpdateAnnotation}
                 onAddAnnotation={handleAddAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                selectedAnnId={selectedAnnId}
+                onSelectAnnotation={handleSelectAnnotation}
                 zoomScale={zoomScale}
                 positionX={viewPan.positionX}
                 positionY={viewPan.positionY}

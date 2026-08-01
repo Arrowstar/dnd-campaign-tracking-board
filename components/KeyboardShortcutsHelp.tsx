@@ -19,6 +19,7 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
     icon: <MousePointerClick size={14} className="text-[#B58D3D]" />,
     rows: [
       { keys: ['Click a card'], action: 'Select a board item', detail: 'Selected cards get a gold ring' },
+      { keys: ['Click an annotation'], action: 'Select an annotation', detail: 'Lines, arrows, shapes & text' },
       { keys: ['Click empty space'], action: 'Deselect' },
       { keys: ['Enter'], action: 'Open selected item in focus drawer', detail: 'Same as double-clicking a card' },
     ],
@@ -27,9 +28,9 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
     title: 'Editing',
     icon: <Trash2 size={14} className="text-[#B58D3D]" />,
     rows: [
-      { keys: ['Delete', 'Backspace'], action: 'Delete the selected item', detail: 'Instant — no confirmation' },
-      { keys: ['↑ ↓ ← →'], action: 'Nudge selected item 1px' },
-      { keys: ['Shift + ↑ ↓ ← →'], action: 'Nudge selected item 10px' },
+      { keys: ['Delete', 'Backspace'], action: 'Delete the selected item or annotation', detail: 'Instant — no confirmation' },
+      { keys: ['↑ ↓ ← →'], action: 'Nudge selected item or annotation 1px' },
+      { keys: ['Shift + ↑ ↓ ← →'], action: 'Nudge selected item or annotation 10px' },
     ],
   },
   {
@@ -115,7 +116,7 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
           <div className="flex items-start gap-2 p-3 rounded-lg text-xs" style={{ background: 'rgba(181,141,61,0.08)', border: '1px solid rgba(181,141,61,0.25)' }}>
             <ExternalLink size={14} className="text-[#B58D3D] flex-shrink-0 mt-0.5" />
             <span className="text-[#C9C0B1]">
-              Tip: click a card to select it, then use <Kbd>Delete</Kbd> to remove it or <Kbd>Enter</Kbd> to open its details.
+              Tip: click a card or annotation to select it, then use <Kbd>Delete</Kbd> to remove it or <Kbd>↑ ↓ ← →</Kbd> to nudge it around the board.
             </span>
           </div>
         </div>
