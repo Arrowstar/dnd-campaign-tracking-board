@@ -89,6 +89,13 @@ export default function AnnotationCanvas({
     initialY2?: number;
   } | null>(null);
 
+  // Rotating an annotation via its rotation handle
+  const [rotatingAnn, setRotatingAnn] = useState<{
+    annId: string;
+    centerX: number;
+    centerY: number;
+  } | null>(null);
+
   const canEdit = useCallback((annId: string) => {
     if (!user) return false;
     if (user.role === 'dm') return true;
@@ -126,7 +133,7 @@ export default function AnnotationCanvas({
 
   // Global pointer listeners while dragging a pin handle or moving an annotation
   useEffect(() => {
-    if (!draggingHandle && !movingAnn) return;
+    if (!draggingHandle && !movingAnn && !rotatingAnn) return;
 
     const handleWindowPointerMove = (e: PointerEvent) => {
       const svgEl = document.querySelector('svg[data-annotation-layer]') as SVGElement;
@@ -137,6 +144,19 @@ export default function AnnotationCanvas({
         x: (e.clientX - rect.left - positionX) / scaleFactor,
         y: (e.clientY - rect.top - positionY) / scaleFactor,
       };
+
+      if (rotatingAnn) {
+        const targetAnn = annotations.find((a) => a.id === rotatingAnn.annId);
+        if (targetAnn) {
+          const raw =
+            Math.atan2(coords.y - rotatingAnn.centerY, coords.x - rotatingAnn.centerX) *
+              (180 / Math.PI) +
+            90;
+          let angle = ((raw % 360) + 360) % 360;
+          if (e.shiftKey) angle = (Math.round(angle / 15) * 15) % 360;
+          onUpdateAnnotation({ ...targetAnn, rotation: angle });
+        }
+      }
 
       if (draggingHandle) {
         const pinTarget = findPinTargetItem(coords.x, coords.y, items, dragOffsets, itemDimensions);
@@ -156,6 +176,7 @@ export default function AnnotationCanvas({
     const handleWindowPointerUp = () => {
       setMovingAnn(null);
       setDraggingHandle(null);
+      setRotatingAnn(null);
       setActivePinHover(null);
     };
 
@@ -165,7 +186,7 @@ export default function AnnotationCanvas({
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
     };
-  }, [draggingHandle, movingAnn, items, dragOffsets, itemDimensions, zoomScale, positionX, positionY]);
+  }, [draggingHandle, movingAnn, rotatingAnn, annotations, onUpdateAnnotation, items, dragOffsets, itemDimensions, zoomScale, positionX, positionY]);
 
   // ── Helper to convert Mouse Event -> Board Canvas Coords (4000x4000) ──────────
   const getCanvasCoords = useCallback((e: React.PointerEvent<SVGElement | HTMLDivElement>) => {
@@ -247,6 +268,18 @@ export default function AnnotationCanvas({
           const boxRight = boxX + curW;
           const boxBottom = boxY + curH;
 
+          // Inverse-rotate the pointer around the box center so the axis-aligned
+          // resize math works for rotated text (rotation pivots around the center).
+          const centerX = boxX + curW / 2;
+          const centerY = boxY + curH / 2;
+          const rotRad = -((targetAnn.rotation ?? 0) * Math.PI) / 180;
+          const rCos = Math.cos(rotRad);
+          const rSin = Math.sin(rotRad);
+          const relX = coords.x - centerX;
+          const relY = coords.y - centerY;
+          const cpx = centerX + relX * rCos - relY * rSin;
+          const cpy = centerY + relX * rSin + relY * rCos;
+
           let newBoxX = boxX;
           let newBoxY = boxY;
           let newWidth = curW;
@@ -254,23 +287,23 @@ export default function AnnotationCanvas({
 
           if (draggingHandle.handleIndex === 1) {
             // Bottom-Right
-            newWidth = Math.max(80, coords.x - boxX);
-            newHeight = Math.max(36, coords.y - boxY);
+            newWidth = Math.max(80, cpx - boxX);
+            newHeight = Math.max(36, cpy - boxY);
           } else if (draggingHandle.handleIndex === 2) {
             // Top-Left
-            newWidth = Math.max(80, boxRight - coords.x);
-            newHeight = Math.max(36, boxBottom - coords.y);
+            newWidth = Math.max(80, boxRight - cpx);
+            newHeight = Math.max(36, boxBottom - cpy);
             newBoxX = boxRight - newWidth;
             newBoxY = boxBottom - newHeight;
           } else if (draggingHandle.handleIndex === 3) {
             // Top-Right
-            newWidth = Math.max(80, coords.x - boxX);
-            newHeight = Math.max(36, boxBottom - coords.y);
+            newWidth = Math.max(80, cpx - boxX);
+            newHeight = Math.max(36, boxBottom - cpy);
             newBoxY = boxBottom - newHeight;
           } else if (draggingHandle.handleIndex === 4) {
             // Bottom-Left
-            newWidth = Math.max(80, boxRight - coords.x);
-            newHeight = Math.max(36, coords.y - boxY);
+            newWidth = Math.max(80, boxRight - cpx);
+            newHeight = Math.max(36, cpy - boxY);
             newBoxX = boxRight - newWidth;
           }
 
@@ -486,7 +519,7 @@ export default function AnnotationCanvas({
       <svg
         data-annotation-layer
         className={`absolute inset-0 w-full h-full z-10 overflow-visible select-none ${
-          (activeTool && activeTool.startsWith('ann_')) || draggingHandle || movingAnn ? 'no-pan' : ''
+          (activeTool && activeTool.startsWith('ann_')) || draggingHandle || movingAnn || rotatingAnn ? 'no-pan' : ''
         }`}
         style={{
           pointerEvents: activeTool && activeTool.startsWith('ann_') ? 'auto' : 'none',
@@ -508,6 +541,13 @@ export default function AnnotationCanvas({
           const sw = ann.strokeWidth !== undefined ? ann.strokeWidth : (ann.type === 'text' ? 1.5 : 3);
           const sc = ann.strokeColor || '#EF4444';
           const fc = ann.fillColor || 'transparent';
+          const rot = ann.rotation ?? 0;
+          const rotRad = (rot * Math.PI) / 180;
+          const defW = ann.type === 'text' ? 160 : 100;
+          const defH = ann.type === 'text' ? 50 : 100;
+          const centerX = (geom.x ?? ann.x) + (geom.width ?? defW) / 2;
+          const centerY = (geom.y ?? ann.y) + (geom.height ?? defH) / 2;
+          const rotTransform = `rotate(${rot}, ${centerX}, ${centerY})`;
 
           return (
             <g key={ann.id} className="group no-pan">
@@ -644,7 +684,7 @@ export default function AnnotationCanvas({
                 const rh = geom.height ?? 100;
 
                 return (
-                  <g className="no-pan">
+                  <g transform={rotTransform} className="no-pan">
                     {isSelected && (
                       <rect
                         x={rx - 2}
@@ -712,7 +752,7 @@ export default function AnnotationCanvas({
                 const cry = geom.ry ?? 50;
 
                 return (
-                  <g className="no-pan">
+                  <g transform={rotTransform} className="no-pan">
                     {isSelected && (
                       <ellipse
                         cx={cx}
@@ -779,13 +819,14 @@ export default function AnnotationCanvas({
                 const th = geom.height ?? 50;
 
                 return (
-                  <foreignObject
-                    x={tx}
-                    y={ty}
-                    width={tw}
-                    height={th}
-                    style={{ pointerEvents: 'all' }}
-                    className="overflow-visible cursor-pointer no-pan"
+                  <g transform={rotTransform} className="no-pan">
+                    <foreignObject
+                      x={tx}
+                      y={ty}
+                      width={tw}
+                      height={th}
+                      style={{ pointerEvents: 'all' }}
+                      className="overflow-visible cursor-pointer no-pan"
                     onPointerDown={(e) => {
                       if (!canEdit(ann.id)) return;
                       if (editingTextAnnId === ann.id) return;
@@ -873,6 +914,7 @@ export default function AnnotationCanvas({
                       )}
                     </div>
                   </foreignObject>
+                  </g>
                 );
               })()}
 
@@ -1030,7 +1072,7 @@ export default function AnnotationCanvas({
                   )}
                   {/* Corner Resize Handles for Text Annotation */}
                   {ann.type === 'text' && (
-                    <g className="no-pan">
+                    <g transform={rotTransform} className="no-pan">
                       {[
                         { index: 1, x: (geom.x ?? 0) + (geom.width ?? 160), y: (geom.y ?? 0) + (geom.height ?? 50), cursor: 'cursor-nwse-resize' },
                         { index: 2, x: (geom.x ?? 0), y: (geom.y ?? 0), cursor: 'cursor-nwse-resize' },
@@ -1073,6 +1115,73 @@ export default function AnnotationCanvas({
                       ))}
                     </g>
                   )}
+
+                  {/* ROTATION HANDLE for Rectangle / Circle / Text */}
+                  {(ann.type === 'rectangle' || ann.type === 'circle' || ann.type === 'text') && (() => {
+                    const handleDist = (geom.height ?? defH) / 2 + 28;
+                    const hx = centerX + Math.sin(rotRad) * handleDist;
+                    const hy = centerY - Math.cos(rotRad) * handleDist;
+                    return (
+                      <g className="no-pan">
+                        <line
+                          x1={centerX}
+                          y1={centerY}
+                          x2={hx}
+                          y2={hy}
+                          stroke="#B58D3D"
+                          strokeWidth={1.5}
+                          strokeDasharray="4 3"
+                          strokeOpacity={0.7}
+                          className="no-pan pointer-events-none"
+                        />
+                        {/* Invisible wider hit target */}
+                        <circle
+                          cx={hx}
+                          cy={hy}
+                          r={20}
+                          fill="transparent"
+                          className="no-pan cursor-grab active:cursor-grabbing"
+                          onPointerDown={(e) => {
+                            if (!canEdit(ann.id)) return;
+                            e.stopPropagation();
+                            if (e.nativeEvent) {
+                              e.nativeEvent.stopPropagation();
+                              e.nativeEvent.stopImmediatePropagation();
+                            }
+                            try {
+                              (e.currentTarget as Element).setPointerCapture(e.pointerId);
+                            } catch {}
+                            onSelectAnnotation(ann.id);
+                            setRotatingAnn({ annId: ann.id, centerX, centerY });
+                          }}
+                        />
+                        <circle
+                          cx={hx}
+                          cy={hy}
+                          r={8}
+                          fill="#B58D3D"
+                          stroke="#FFFFFF"
+                          strokeWidth={2}
+                          className="no-pan cursor-grab active:cursor-grabbing hover:fill-[#D4AF37] hover:stroke-amber-100 transition-colors pointer-events-none"
+                        />
+                        {rotatingAnn?.annId === ann.id && (
+                          <text
+                            x={hx + 14}
+                            y={hy - 10}
+                            fill="#FFFFFF"
+                            stroke="#2C2824"
+                            strokeWidth={3}
+                            paintOrder="stroke"
+                            fontSize={11}
+                            fontWeight={700}
+                            className="no-pan select-none pointer-events-none"
+                          >
+                            {`${Math.round(rot)}°`}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })()}
                 </g>
               )}
             </g>
@@ -1237,18 +1346,19 @@ export default function AnnotationCanvas({
           const y2 = geom.y2 ?? (selectedAnn.y2 ?? selectedAnn.y + 80);
           left = (x1 + x2) / 2;
           top = Math.min(y1, y2) - 12;
-        } else if (selectedAnn.type === 'rectangle' || selectedAnn.type === 'circle') {
+        } else if (selectedAnn.type === 'rectangle' || selectedAnn.type === 'circle' || selectedAnn.type === 'text') {
           const x = geom.x ?? selectedAnn.x;
           const y = geom.y ?? selectedAnn.y;
-          const w = geom.width ?? selectedAnn.width ?? 100;
+          const w = geom.width ?? selectedAnn.width ?? (selectedAnn.type === 'text' ? 160 : 100);
+          const h = geom.height ?? selectedAnn.height ?? (selectedAnn.type === 'text' ? 50 : 100);
           left = x + w / 2;
           top = y - 12;
-        } else if (selectedAnn.type === 'text') {
-          const x = geom.x ?? selectedAnn.x;
-          const y = geom.y ?? selectedAnn.y;
-          const w = geom.width ?? selectedAnn.width ?? 160;
-          left = x + w / 2;
-          top = y - 12;
+          // When rotated, anchor the bar above the shape's rotated top-center
+          const barRotRad = ((selectedAnn.rotation ?? 0) * Math.PI) / 180;
+          if (barRotRad !== 0) {
+            left += Math.sin(barRotRad) * (h / 2);
+            top = y + h / 2 - Math.cos(barRotRad) * (h / 2) - 12;
+          }
         }
 
         return (

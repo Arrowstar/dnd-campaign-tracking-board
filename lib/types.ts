@@ -151,6 +151,8 @@ export type BoardAnnotation = {
   fillColor?: string;
   text?: string;
   fontStyle?: AnnotationFontStyle;
+  /** Rotation in degrees (clockwise, 0 = none), pivoting around the shape's center. */
+  rotation?: number;
   pins?: (BoardAnnotationPin | null)[];
   ownerId?: string;
   ownerName?: string;

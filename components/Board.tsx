@@ -717,6 +717,15 @@ export default function Board({ boardId }: { boardId: string }) {
     };
   };
 
+  // Rotate a shape annotation by delta degrees (clockwise). Only rectangle,
+  // circle, and text annotations support rotation; lines/arrows get direction
+  // from their endpoints. Pivots around the shape's center (render-time).
+  const rotateAnnotation = (ann: BoardAnnotation, delta: number): BoardAnnotation => {
+    if (ann.type === 'line' || ann.type === 'arrow' || ann.type === 'double_arrow') return ann;
+    const current = ann.rotation ?? 0;
+    return { ...ann, rotation: (((current + delta) % 360) + 360) % 360 };
+  };
+
   const saveFullTabsState = useCallback(
     (updatedTabs: BoardTab[], historyKey?: string, nextActiveTabId?: string) => {
       recordHistory(tabs, updatedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`, nextActiveTabId);
@@ -1196,6 +1205,17 @@ export default function Board({ boardId }: { boardId: string }) {
         case 'F':
           if (setTransformRef.current) handleFitView(setTransformRef.current);
           break;
+        case '[':
+        case ']': {
+          if (selectedAnnId) {
+            const ann = annotations.find(a => a.id === selectedAnnId);
+            if (ann) {
+              e.preventDefault();
+              handleUpdateAnnotation(rotateAnnotation(ann, e.key === ']' ? 15 : -15));
+            }
+          }
+          break;
+        }
         case '+':
         case '=':
           zoomInRef.current?.();

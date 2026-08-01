@@ -31,6 +31,7 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
       { keys: ['Delete', 'Backspace'], action: 'Delete the selected item or annotation', detail: 'Instant — no confirmation' },
       { keys: ['↑ ↓ ← →'], action: 'Nudge selected item or annotation 1px' },
       { keys: ['Shift + ↑ ↓ ← →'], action: 'Nudge selected item or annotation 10px' },
+      { keys: ['[', ']'], action: 'Rotate selected annotation 15°', detail: 'Rectangles, ovals & text — drag the gold handle for free rotation' },
     ],
   },
   {
