@@ -18,6 +18,7 @@ import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles } from '@/lib/crossref';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
+import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
 
 const BOARD_ITEM_LOD_THRESHOLDS = {
   fullWidth: 130,
@@ -57,6 +58,7 @@ export default function Board({ boardId }: { boardId: string }) {
   // Modals
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Persistence status — surfaced in the UI instead of silently swallowed
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -122,6 +124,9 @@ export default function Board({ boardId }: { boardId: string }) {
   // Focus drawer state
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [drawerWidth, setDrawerWidth] = useState(520);
+
+  // Keyboard-driven selection (Delete/Enter/arrow-key shortcuts operate on this)
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   
   // Transform state ref & zoom percentage display
   const boardContainerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +136,9 @@ export default function Board({ boardId }: { boardId: string }) {
     scale: 1
   });
   const setTransformRef = useRef<((x: number, y: number, scale: number, animTime?: number) => void) | null>(null);
+  const zoomInRef = useRef<(() => void) | null>(null);
+  const zoomOutRef = useRef<(() => void) | null>(null);
+  const resetTransformRef = useRef<(() => void) | null>(null);
   const [zoomScale, setZoomScale] = useState<number>(100);
   // Viewport-level pan offset (canvas coordinates -> screen coordinates),
   // mirrored from the TransformWrapper so the annotation layer can match it.
@@ -673,7 +681,7 @@ export default function Board({ boardId }: { boardId: string }) {
     }
   };
 
-  const handleFitView = (setTransform: (x: number, y: number, scale: number, animTime?: number) => void) => {
+  const handleFitView = useCallback((setTransform: (x: number, y: number, scale: number, animTime?: number) => void) => {
     if (!user) return;
     const visibleItems = items.filter(i => {
       if (i.visibility === 'dm' && user.role !== 'dm' && i.ownerId !== user.id) return false;
@@ -745,7 +753,7 @@ export default function Board({ boardId }: { boardId: string }) {
     const targetY = viewportH / 2 - centerY * targetScale;
 
     setTransform(targetX, targetY, targetScale, 300);
-  };
+  }, [user, items, itemDimensions]);
 
   const handleUpdateItem = useCallback((updatedItem: BoardItemType) => {
     const existing = items.find(i => i.id === updatedItem.id);
@@ -832,8 +840,12 @@ export default function Board({ boardId }: { boardId: string }) {
         setIsAddingConnection(false);
         setConnectionStart(null);
       }
+      return;
     }
-    // When NOT in connection mode, clicking selects — open focus via the ExternalLink button
+    // When NOT in connection mode, clicking selects — keyboard shortcuts
+    // (Delete, Enter, arrows) operate on the selection. Open focus via
+    // double-click, the ExternalLink button, or pressing Enter.
+    setSelectedItemId(id);
   }, [isAddingConnection, connectionStart, connectionColor, connectionStyle, connectionWidth, items, connections, saveState]);
 
   const handleOpenFocus = useCallback((id: string) => {
@@ -843,6 +855,78 @@ export default function Board({ boardId }: { boardId: string }) {
   const handleCloseFocus = useCallback(() => {
     setFocusedItemId(null);
   }, []);
+
+  // ── Global keyboard shortcuts ───────────────────────────────────────────────
+  // Operate on the selected board item (click a card to select it). Keys are
+  // ignored while typing in inputs/editors or when a modal is open.
+  useEffect(() => {
+    const isTypingTarget = (el: Element | null) =>
+      !!el &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
+       el.tagName === 'BUTTON' || el.tagName === 'A' || (el as HTMLElement).isContentEditable);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(document.activeElement)) return;
+      if (showMembersModal || showUserSettingsModal) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case 'Delete':
+        case 'Backspace':
+          if (selectedItemId) {
+            e.preventDefault();
+            handleDeleteItem(selectedItemId);
+            setSelectedItemId(null);
+          }
+          break;
+        case 'Escape':
+          setSelectedItemId(null);
+          setIsAddingConnection(false);
+          setConnectionStart(null);
+          setActiveTool(null);
+          setShowShortcutsHelp(false);
+          handleCloseFocus();
+          break;
+        case 'Enter':
+          if (selectedItemId) {
+            e.preventDefault();
+            handleOpenFocus(selectedItemId);
+          }
+          break;
+        case 'ArrowUp':
+        case 'ArrowDown':
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          const selected = items.find(i => i.id === selectedItemId);
+          if (selected) {
+            e.preventDefault();
+            const step = e.shiftKey ? 10 : 1;
+            const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+            const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+            handleUpdateItem({ ...selected, x: selected.x + dx, y: selected.y + dy });
+          }
+          break;
+        }
+        case 'f':
+        case 'F':
+          if (setTransformRef.current) handleFitView(setTransformRef.current);
+          break;
+        case '+':
+        case '=':
+          zoomInRef.current?.();
+          break;
+        case '-':
+          zoomOutRef.current?.();
+          break;
+        case '0':
+          resetTransformRef.current?.();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedItemId, items, showMembersModal, showUserSettingsModal, handleDeleteItem, handleUpdateItem, handleOpenFocus, handleCloseFocus, handleFitView]);
 
   const handleDragStartItem = useCallback(() => setIsDraggingItem(true), []);
 
@@ -931,11 +1015,15 @@ export default function Board({ boardId }: { boardId: string }) {
         setActiveAnnFontStyle={setActiveAnnFontStyle}
         onOpenMembersModal={() => setShowMembersModal(true)}
         onOpenSettingsModal={() => setShowUserSettingsModal(true)}
+        onOpenShortcutsHelp={() => setShowShortcutsHelp(true)}
       />
       <TabBar
         tabs={tabs}
         activeTabId={activeTabId}
-        onSelectTab={setActiveTabId}
+        onSelectTab={(tabId) => {
+          setSelectedItemId(null);
+          setActiveTabId(tabId);
+        }}
         onAddTab={handleAddTab}
         onRenameTab={handleRenameTab}
         onChangeTabColor={handleChangeTabColor}
@@ -996,8 +1084,11 @@ export default function Board({ boardId }: { boardId: string }) {
           }}
         >
           {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
-            // Capture setTransform for use in scroll-to-item handler
+            // Capture transform/zoom actions for use in keyboard shortcuts & scroll-to-item handler
             setTransformRef.current = setTransform;
+            zoomInRef.current = zoomIn;
+            zoomOutRef.current = zoomOut;
+            resetTransformRef.current = resetTransform;
             return (
             <>
               <div className="absolute bottom-4 right-4 z-50 flex items-center gap-1.5 bg-[#2C2824] p-1.5 rounded-lg border border-[#B58D3D] shadow-2xl text-[#E0D8D0]">
@@ -1033,7 +1124,11 @@ export default function Board({ boardId }: { boardId: string }) {
                 </button>
               </div>
               <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }} contentStyle={{ width: '4000px', height: '4000px', overflow: 'visible' }}>
-                <div ref={boardContainerRef} className="w-[4000px] h-[4000px] relative">
+                <div ref={boardContainerRef} className="w-[4000px] h-[4000px] relative" onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest('[data-item-root]')) return;
+                  setSelectedItemId(null);
+                }}>
                   {/* Infinite Grid Background */}
                   <div 
                     className="absolute pointer-events-none" 
@@ -1430,7 +1525,7 @@ export default function Board({ boardId }: { boardId: string }) {
                         onUpdate={handleUpdateItem}
                         onDelete={handleDeleteItem}
                         onClick={handleItemClick}
-                        isSelected={connectionStart === item.id}
+                        isSelected={connectionStart === item.id || selectedItemId === item.id}
                         isFocused={focusedItemId === item.id}
                         onDragStart={handleDragStartItem}
                         onDragMove={handleDragMove}
@@ -1517,6 +1612,10 @@ export default function Board({ boardId }: { boardId: string }) {
               sessionToken={user.sessionToken}
               currentUserId={user.id}
               currentUserRole={user.role}
+            />
+            <KeyboardShortcutsHelp
+              isOpen={showShortcutsHelp}
+              onClose={() => setShowShortcutsHelp(false)}
             />
           </>
         )}

@@ -1030,9 +1030,12 @@ export default memo(function BoardItem({
           ? '0 0 0 3px #B58D3D66, 0 8px 32px rgba(181,141,61,0.25)'
           : isFocused
           ? '0 0 0 2px #B58D3D55, 0 8px 32px rgba(0,0,0,0.18)'
+          : isSelected
+          ? '0 0 0 2px #B58D3D, 0 8px 32px rgba(0,0,0,0.15)'
           : '0 4px 16px rgba(0,0,0,0.12)',
       }}
       className={`${renderPinCard ? '' : 'flex flex-col'} nodrag transition-shadow duration-200`}
+      data-item-root
       onClick={() => onClick(item.id)}
       onDragOver={(e) => {
         if (!canAcceptImageDrop) return;

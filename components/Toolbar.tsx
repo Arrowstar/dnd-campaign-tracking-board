@@ -7,7 +7,7 @@ import {
   Swords, Flag, Shield, Activity, Image as ImageIcon,
   MoveRight, X, Palette, Sliders, Minus, MoveHorizontal,
   Circle, Square, Type, Pencil, MousePointer, LogOut,
-  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound, Keyboard
 } from 'lucide-react';
 import { 
   ANNOTATION_COLOR_PRESETS, 
@@ -70,6 +70,7 @@ interface ToolbarProps {
 
   onOpenMembersModal?: () => void;
   onOpenSettingsModal?: () => void;
+  onOpenShortcutsHelp?: () => void;
 }
 
 export default function Toolbar({ 
@@ -99,6 +100,7 @@ export default function Toolbar({
 
   onOpenMembersModal,
   onOpenSettingsModal,
+  onOpenShortcutsHelp,
 }: ToolbarProps) {
   const [showConnectSettings, setShowConnectSettings] = useState(false);
   const [showAnnSettings, setShowAnnSettings] = useState(false);
@@ -163,6 +165,18 @@ export default function Toolbar({
             >
               <KeyRound size={14} className="text-[#B58D3D]" />
               <span>Settings</span>
+            </button>
+          )}
+
+          {onOpenShortcutsHelp && (
+            <button
+              type="button"
+              onClick={onOpenShortcutsHelp}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Keyboard shortcuts (?)"
+            >
+              <Keyboard size={14} className="text-[#B58D3D]" />
+              <span>Shortcuts</span>
             </button>
           )}
 
