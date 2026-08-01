@@ -132,6 +132,9 @@ export default function Board({ boardId }: { boardId: string }) {
   });
   const setTransformRef = useRef<((x: number, y: number, scale: number, animTime?: number) => void) | null>(null);
   const [zoomScale, setZoomScale] = useState<number>(100);
+  // Viewport-level pan offset (canvas coordinates -> screen coordinates),
+  // mirrored from the TransformWrapper so the annotation layer can match it.
+  const [viewPan, setViewPan] = useState<{ positionX: number; positionY: number }>({ positionX: 0, positionY: 0 });
 
   // Revision of the board state whose full payload we last applied locally.
   // The realtime poller only downloads the full board when this changes.
@@ -989,6 +992,7 @@ export default function Board({ boardId }: { boardId: string }) {
               scale: ref.state.scale
             };
             setZoomScale(Math.round(ref.state.scale * 100));
+            setViewPan({ positionX: ref.state.positionX, positionY: ref.state.positionY });
           }}
         >
           {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
@@ -1413,26 +1417,6 @@ export default function Board({ boardId }: { boardId: string }) {
                     );
                   })}
 
-                  {/* Interactive Annotation Overlay */}
-                  <AnnotationCanvas
-                    user={user}
-                    annotations={annotations}
-                    items={items}
-                    dragOffsets={dragOffsets}
-                    itemDimensions={itemDimensions}
-                    activeTool={activeTool}
-                    setActiveTool={setActiveTool}
-                    activeColor={activeAnnColor}
-                    activeStrokeWidth={activeAnnStrokeWidth}
-                    activeStrokeStyle={activeAnnStrokeStyle}
-                    activeFillColor={activeAnnFillColor}
-                    activeFontStyle={activeAnnFontStyle}
-                    onUpdateAnnotation={handleUpdateAnnotation}
-                    onAddAnnotation={handleAddAnnotation}
-                    onDeleteAnnotation={handleDeleteAnnotation}
-                    zoomScale={zoomScale}
-                  />
-
                   {/* Board Items */}
                   {items.map(item => {
                     if (item.visibility === 'dm' && user.role !== 'dm' && item.ownerId !== user.id) return null;
@@ -1463,6 +1447,31 @@ export default function Board({ boardId }: { boardId: string }) {
                   })}
                 </div>
               </TransformComponent>
+
+              {/* Interactive Annotation Overlay
+                  Rendered at viewport level (outside the transformed content) so
+                  pointer events reach it across the whole canvas, even when the
+                  content is panned/zoomed. Coordinates are mapped with viewPan. */}
+              <AnnotationCanvas
+                user={user}
+                annotations={annotations}
+                items={items}
+                dragOffsets={dragOffsets}
+                itemDimensions={itemDimensions}
+                activeTool={activeTool}
+                setActiveTool={setActiveTool}
+                activeColor={activeAnnColor}
+                activeStrokeWidth={activeAnnStrokeWidth}
+                activeStrokeStyle={activeAnnStrokeStyle}
+                activeFillColor={activeAnnFillColor}
+                activeFontStyle={activeAnnFontStyle}
+                onUpdateAnnotation={handleUpdateAnnotation}
+                onAddAnnotation={handleAddAnnotation}
+                onDeleteAnnotation={handleDeleteAnnotation}
+                zoomScale={zoomScale}
+                positionX={viewPan.positionX}
+                positionY={viewPan.positionY}
+              />
             </>
             );
           }}

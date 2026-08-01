@@ -28,6 +28,8 @@ interface AnnotationCanvasProps {
   onAddAnnotation: (newAnn: BoardAnnotation) => void;
   onDeleteAnnotation: (id: string) => void;
   zoomScale: number;
+  positionX: number;
+  positionY: number;
 }
 
 export default function AnnotationCanvas({
@@ -47,6 +49,8 @@ export default function AnnotationCanvas({
   onAddAnnotation,
   onDeleteAnnotation,
   zoomScale,
+  positionX,
+  positionY,
 }: AnnotationCanvasProps) {
   const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null);
   const [showFullInspector, setShowFullInspector] = useState<boolean>(false);
@@ -121,13 +125,13 @@ export default function AnnotationCanvas({
     if (!draggingHandle && !movingAnn) return;
 
     const handleWindowPointerMove = (e: PointerEvent) => {
-      const svgEl = document.querySelector('svg.absolute.inset-0') as SVGElement;
+      const svgEl = document.querySelector('svg[data-annotation-layer]') as SVGElement;
       if (!svgEl) return;
       const rect = svgEl.getBoundingClientRect();
       const scaleFactor = zoomScale > 0 ? zoomScale / 100 : 1;
       const coords = {
-        x: (e.clientX - rect.left) / scaleFactor,
-        y: (e.clientY - rect.top) / scaleFactor,
+        x: (e.clientX - rect.left - positionX) / scaleFactor,
+        y: (e.clientY - rect.top - positionY) / scaleFactor,
       };
 
       if (draggingHandle) {
@@ -157,20 +161,21 @@ export default function AnnotationCanvas({
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
     };
-  }, [draggingHandle, movingAnn, items, dragOffsets, itemDimensions, zoomScale]);
+  }, [draggingHandle, movingAnn, items, dragOffsets, itemDimensions, zoomScale, positionX, positionY]);
 
   // ── Helper to convert Mouse Event -> Board Canvas Coords (4000x4000) ──────────
   const getCanvasCoords = useCallback((e: React.PointerEvent<SVGElement | HTMLDivElement>) => {
     const svgEl = e.currentTarget.closest('svg') || (e.currentTarget as HTMLElement);
     const rect = svgEl.getBoundingClientRect();
 
-    // Accounts for CSS transform zoom inside TransformWrapper (zoomScale is percentage like 100)
+    // Accounts for CSS transform zoom/pan inside TransformWrapper (zoomScale is
+    // percentage like 100; positionX/positionY are the viewport-space pan offset)
     const scaleFactor = zoomScale > 0 ? zoomScale / 100 : 1;
-    const x = (e.clientX - rect.left) / scaleFactor;
-    const y = (e.clientY - rect.top) / scaleFactor;
+    const x = (e.clientX - rect.left - positionX) / scaleFactor;
+    const y = (e.clientY - rect.top - positionY) / scaleFactor;
 
     return { x, y };
-  }, [zoomScale]);
+  }, [zoomScale, positionX, positionY]);
 
   // ── Canvas Pointer Down (Drawing or Selecting) ──────────────────────────────
   const handlePointerDownCanvas = (e: React.PointerEvent<SVGElement>) => {
@@ -475,6 +480,7 @@ export default function AnnotationCanvas({
   return (
     <>
       <svg
+        data-annotation-layer
         className={`absolute inset-0 w-full h-full z-10 overflow-visible select-none ${
           (activeTool && activeTool.startsWith('ann_')) || draggingHandle || movingAnn ? 'no-pan' : ''
         }`}
@@ -486,6 +492,9 @@ export default function AnnotationCanvas({
         onPointerMove={handlePointerMoveCanvas}
         onPointerUp={handlePointerUpCanvas}
       >
+        {/* Content is rendered in board canvas coordinates; the group applies the
+            same pan/zoom transform as the board content below it. */}
+        <g transform={`translate(${positionX}, ${positionY}) scale(${zoomScale / 100})`}>
         {/* Render Saved Annotations */}
         {annotations.map((ann) => {
           const geom = getResolvedControlPoints(ann, items, dragOffsets, itemDimensions);
@@ -1208,6 +1217,7 @@ export default function AnnotationCanvas({
           }
           return null;
         })()}
+        </g>
       </svg>
 
       {/* FLOATING ANNOTATION QUICK BAR / INSPECTOR OVERLAY */}
@@ -1241,8 +1251,8 @@ export default function AnnotationCanvas({
           <div
             style={{
               position: 'absolute',
-              left: `${left}px`,
-              top: `${top}px`,
+              left: `${left * (zoomScale / 100) + positionX}px`,
+              top: `${top * (zoomScale / 100) + positionY}px`,
               transform: 'translate(-50%, -100%)',
               zIndex: 60,
               pointerEvents: 'auto',
