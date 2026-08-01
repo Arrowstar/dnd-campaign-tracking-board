@@ -69,6 +69,8 @@ export default function Board({ boardId }: { boardId: string }) {
 
   // Persistence status — surfaced in the UI instead of silently swallowed
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Save/sync status for the tab-bar indicator: 'saved' | 'saving' | 'syncing' | 'error'
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'syncing' | 'error'>('saved');
 
   // Board member display names (for member-select field widgets)
   const [memberNames, setMemberNames] = useState<string[]>([]);
@@ -501,9 +503,16 @@ export default function Board({ boardId }: { boardId: string }) {
         if (revision === null || revision === appliedRevisionRef.current) return;
         // Never yank state mid-edit; the revision is only marked as applied
         // once the full state actually landed, so we retry after typing stops.
-        if (isActivelyEditing()) return;
+        if (isActivelyEditing()) {
+          // Remote changes are queued up — surface it so users know the board
+          // will update (and isn't already reflecting the latest revision).
+          setSaveStatus('syncing');
+          return;
+        }
+        setSaveStatus('syncing');
         if (await applyFullState()) {
           appliedRevisionRef.current = revision;
+          setSaveStatus('saved');
         }
       } catch (err) {
         console.error('Failed to check board revision:', err);
@@ -536,6 +545,7 @@ export default function Board({ boardId }: { boardId: string }) {
     (updatedTabs: BoardTab[]) => {
       if (!user?.sessionToken) return;
       saveQueueRef.current = saveQueueRef.current.then(async () => {
+        setSaveStatus('saving');
         const body = JSON.stringify({ tabs: updatedTabs });
         const approxMb = body.length / (1024 * 1024);
         if (approxMb > 4) {
@@ -543,6 +553,7 @@ export default function Board({ boardId }: { boardId: string }) {
           setSaveError(
             'This board is too large to save (likely an old image stored directly in the board instead of as a link). Contact the DM about running the image migration.'
           );
+          setSaveStatus('error');
           return;
         }
         try {
@@ -562,6 +573,7 @@ export default function Board({ boardId }: { boardId: string }) {
                 ? 'This board is too large to save. Contact the DM about running the image migration.'
                 : "Your last change couldn't be saved. Retrying automatically."
             );
+            setSaveStatus('error');
             return;
           }
           // The save echo includes the new revision, so the realtime poller
@@ -571,9 +583,11 @@ export default function Board({ boardId }: { boardId: string }) {
             appliedRevisionRef.current = saved.updatedAt;
           }
           setSaveError(null);
+          setSaveStatus('saved');
         } catch (err) {
           console.error('Error saving board state:', err);
           setSaveError("Your last change couldn't be saved. Retrying automatically.");
+          setSaveStatus('error');
         }
       });
     },
@@ -1354,6 +1368,8 @@ export default function Board({ boardId }: { boardId: string }) {
         onChangeTabColor={handleChangeTabColor}
         onReorderTabs={handleReorderTabs}
         onDeleteTab={handleDeleteTab}
+        saveStatus={saveStatus}
+        saveError={saveError}
       />
       
       <div className="flex-1 relative flex overflow-hidden">

@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { BoardTab } from '@/lib/types';
 import { 
   Plus, MoreVertical, Edit2, Palette, Trash2, 
-  ChevronLeft, ChevronRight, GripVertical, Check, X 
+  ChevronLeft, ChevronRight, GripVertical, Check, X,
+  Loader2, CloudCheck, RefreshCw, CloudOff
 } from 'lucide-react';
 
 export const TAB_COLOR_PRESETS = [
@@ -29,6 +30,8 @@ interface TabBarProps {
   onChangeTabColor: (tabId: string, newColor: string) => void;
   onReorderTabs: (reorderedTabs: BoardTab[]) => void;
   onDeleteTab: (tabId: string) => void;
+  saveStatus: 'saved' | 'saving' | 'syncing' | 'error';
+  saveError?: string | null;
 }
 
 export default function TabBar({
@@ -40,6 +43,8 @@ export default function TabBar({
   onChangeTabColor,
   onReorderTabs,
   onDeleteTab,
+  saveStatus,
+  saveError,
 }: TabBarProps) {
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -275,6 +280,32 @@ export default function TabBar({
           <span>New Tab</span>
         </button>
       </div>
+
+      {/* Save / Sync Status Indicator */}
+      {saveStatus === 'saving' && (
+        <div className="flex items-center gap-1.5 pl-3 pr-2 flex-shrink-0" title="Saving changes…" aria-label="Saving changes">
+          <Loader2 size={14} className="animate-spin text-[#B58D3D]" />
+        </div>
+      )}
+      {saveStatus === 'saved' && (
+        <div className="flex items-center gap-1.5 pl-3 pr-2 flex-shrink-0" title="All changes saved" aria-label="All changes saved">
+          <CloudCheck size={14} className="text-emerald-400" />
+        </div>
+      )}
+      {saveStatus === 'syncing' && (
+        <div className="flex items-center gap-1.5 pl-3 pr-2 flex-shrink-0" title="Syncing changes from other users…" aria-label="Syncing changes from other users">
+          <RefreshCw size={14} className="animate-spin text-[#B58D3D]" />
+        </div>
+      )}
+      {saveStatus === 'error' && (
+        <div
+          className="flex items-center gap-1.5 pl-3 pr-2 flex-shrink-0"
+          title={saveError || "Your last change couldn't be saved. Retrying automatically."}
+          aria-label="Save failed"
+        >
+          <CloudOff size={14} className="text-red-500" />
+        </div>
+      )}
 
       {/* Global Tab Options Dropdown Menu (Positioned safely outside overflow clipping) */}
       {openMenuTabId && targetTab && (
