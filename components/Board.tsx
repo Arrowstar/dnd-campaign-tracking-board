@@ -151,6 +151,7 @@ export default function Board({ boardId }: { boardId: string }) {
     scale: 1
   });
   const setTransformRef = useRef<((x: number, y: number, scale: number, animTime?: number) => void) | null>(null);
+  const fitViewRef = useRef<() => void>(() => {});
   const zoomInRef = useRef<(() => void) | null>(null);
   const zoomOutRef = useRef<(() => void) | null>(null);
   const resetTransformRef = useRef<(() => void) | null>(null);
@@ -311,6 +312,17 @@ export default function Board({ boardId }: { boardId: string }) {
       })
       .catch(err => console.error('Failed to load board:', err));
   }, [boardId]);
+
+  // Fit view on initial board entry so everything on the active tab is visible.
+  const didInitialFitRef = useRef(false);
+  useEffect(() => {
+    if (!user || didInitialFitRef.current) return;
+    const t = setTimeout(() => {
+      didInitialFitRef.current = true;
+      fitViewRef.current();
+    }, 50);
+    return () => clearTimeout(t);
+  }, [user]);
 
   // Real-time sync via revision polling: a cheap revision request every few
   // seconds tells us if the board changed elsewhere; the full (per-user
@@ -624,6 +636,8 @@ export default function Board({ boardId }: { boardId: string }) {
     const updatedTabs = [...tabs, newTab];
     setActiveTabId(newTab.id);
     saveFullTabsState(updatedTabs, undefined, newTab.id);
+    // Fit the new (empty) tab to the canvas origin
+    setTimeout(() => fitViewRef.current(), 50);
   }, [tabs, saveFullTabsState]);
 
   const handleRenameTab = useCallback((tabId: string, newName: string) => {
@@ -868,6 +882,14 @@ export default function Board({ boardId }: { boardId: string }) {
 
     setTransform(targetX, targetY, targetScale, 300);
   }, [user, items, itemDimensions]);
+
+  // Keep a stable ref to the latest fit-view function so it can be triggered
+  // from effects/handlers without stale-closure issues.
+  useEffect(() => {
+    fitViewRef.current = () => {
+      if (setTransformRef.current) handleFitView(setTransformRef.current);
+    };
+  }, [handleFitView]);
 
   const handleUpdateItem = useCallback((updatedItem: BoardItemType) => {
     const existing = items.find(i => i.id === updatedItem.id);
@@ -1189,6 +1211,8 @@ export default function Board({ boardId }: { boardId: string }) {
         onSelectTab={(tabId) => {
           setSelectedItemId(null);
           setActiveTabId(tabId);
+          // Fit view on the newly entered tab so all its items are visible
+          setTimeout(() => fitViewRef.current(), 50);
         }}
         onAddTab={handleAddTab}
         onRenameTab={handleRenameTab}
