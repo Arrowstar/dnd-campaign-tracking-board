@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from 'react';
 import { motion } from 'motion/react';
-import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout, PreviewFieldMode } from '@/lib/types';
 import { canViewField } from '@/lib/fieldVisibility';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
@@ -351,8 +351,43 @@ interface BoardItemProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Hero (full-width) image previews render at 140px tall; thumbnail previews
-// are 72px-tall strips that fill the column width. (Hardcoded in the class
-// names below — Tailwind needs static classes.)
+// are 72px-tall strips that fill the column width. 'natural' renders the image
+// at its intrinsic aspect ratio (no height cap) and 'fill' stretches it to
+// cover the whole card body. (Hardcoded in the class names below — Tailwind
+// needs static classes.)
+
+function imagePreviewClasses(mode: Exclude<PreviewFieldMode, 'auto'>): {
+  imgClassName: string;
+  objectFit: 'contain' | 'cover';
+  objectPosition: 'center' | 'top';
+} {
+  if (mode === 'thumb') {
+    return {
+      imgClassName: 'w-full h-[72px] object-cover object-top rounded pointer-events-none select-none',
+      objectFit: 'cover',
+      objectPosition: 'top',
+    };
+  }
+  if (mode === 'natural') {
+    return {
+      imgClassName: 'w-full h-auto object-contain pointer-events-none select-none',
+      objectFit: 'contain',
+      objectPosition: 'center',
+    };
+  }
+  if (mode === 'fill') {
+    return {
+      imgClassName: 'w-full h-full object-cover pointer-events-none select-none',
+      objectFit: 'cover',
+      objectPosition: 'center',
+    };
+  }
+  return {
+    imgClassName: 'w-full h-[140px] object-cover object-top pointer-events-none select-none',
+    objectFit: 'cover',
+    objectPosition: 'top',
+  };
+}
 
 function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: {
   slot: PreviewFieldSlot;
@@ -398,61 +433,35 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   if (item.type === 'npc' && fieldId === 'npc-image') {
     const imageUrl = field?.imageUrl;
     if (!imageUrl) return null;
-    if (mode === 'thumb') {
-      return (
-        <div style={spanStyle} className="min-h-0">
-          <AnnotatedImagePreview
-            imageUrl={imageUrl}
-            lines={field?.lines}
-            alt="NPC portrait"
-            imgClassName="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
-            objectFit="cover"
-            objectPosition="top"
-          />
-        </div>
-      );
-    }
+    const img = imagePreviewClasses(mode);
     return (
       <div style={spanStyle} className="min-h-0">
         <AnnotatedImagePreview
           imageUrl={imageUrl}
           lines={field?.lines}
           alt="NPC portrait"
-          imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
-          objectFit="cover"
-          objectPosition="top"
+          imgClassName={img.imgClassName}
+          objectFit={img.objectFit}
+          objectPosition={img.objectPosition}
         />
       </div>
     );
   }
 
-  // ── Image field — hero banner or small thumbnail ──
+  // ── Image field — hero banner, small thumbnail, natural height, or fill ──
   if (fieldType === 'image') {
     const imageUrl = field?.imageUrl;
     if (!imageUrl) return null;
-    if (mode === 'thumb') {
-      return (
-        <div style={spanStyle} className="min-h-0">
-          <AnnotatedImagePreview
-            imageUrl={imageUrl}
-            lines={field?.lines}
-            alt={fieldLabel}
-            imgClassName="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
-            objectFit="cover"
-            objectPosition="top"
-          />
-        </div>
-      );
-    }
+    const img = imagePreviewClasses(mode);
     return (
       <div style={spanStyle} className="min-h-0">
         <AnnotatedImagePreview
           imageUrl={imageUrl}
           lines={field?.lines}
           alt={fieldLabel}
-          imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
-          objectFit="cover"
-          objectPosition="top"
+          imgClassName={img.imgClassName}
+          objectFit={img.objectFit}
+          objectPosition={img.objectPosition}
         />
       </div>
     );
@@ -733,6 +742,13 @@ export default memo(function BoardItem({
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
+
+  // 'fill' images expand to cover the whole card body — the preview grid must
+  // stretch its rows to fill the available height for that to work.
+  const hasFillPreview = previewLayout.rows.some(slot =>
+    slot.fieldId !== '__image_content__' &&
+    resolveFieldMode(slot, classifyPreviewField(slot.fieldId, item.type, fieldDefs), previewLayout.columns) === 'fill'
+  );
 
   // Merge saved fields with defaults so images always resolve even before drawer is opened
   const resolvedFields: ItemField[] = (() => {
@@ -1218,7 +1234,10 @@ export default memo(function BoardItem({
       {!item.minimized && (
         <div
           className="grid content-start gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
-          style={{ gridTemplateColumns: `repeat(${previewLayout.columns}, minmax(0, 1fr))` }}
+          style={{
+            gridTemplateColumns: `repeat(${previewLayout.columns}, minmax(0, 1fr))`,
+            gridAutoRows: hasFillPreview ? 'minmax(auto, 1fr)' : undefined,
+          }}
           onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
           title="Click to open in focus panel"
           onPointerDownCapture={e => e.stopPropagation()}
