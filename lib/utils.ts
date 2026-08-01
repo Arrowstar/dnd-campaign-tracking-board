@@ -5,6 +5,49 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export interface ImageRenderRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Compute the rectangle (in container CSS pixels) where an image is actually
+ * rendered inside its container for a given object-fit / object-position,
+ * so annotations can be mapped onto the visible image area instead of the
+ * whole container (which may include letterbox or crop padding).
+ */
+export function getImageRenderRect(
+  containerWidth: number,
+  containerHeight: number,
+  naturalWidth: number,
+  naturalHeight: number,
+  fit: 'contain' | 'cover' = 'contain',
+  alignY: 'center' | 'top' = 'center',
+): ImageRenderRect {
+  if (
+    containerWidth <= 0 ||
+    containerHeight <= 0 ||
+    naturalWidth <= 0 ||
+    naturalHeight <= 0
+  ) {
+    return { x: 0, y: 0, width: containerWidth, height: containerHeight };
+  }
+  const scale =
+    fit === 'contain'
+      ? Math.min(containerWidth / naturalWidth, containerHeight / naturalHeight)
+      : Math.max(containerWidth / naturalWidth, containerHeight / naturalHeight);
+  const width = naturalWidth * scale;
+  const height = naturalHeight * scale;
+  return {
+    x: (containerWidth - width) / 2,
+    y: alignY === 'top' ? 0 : (containerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
 export function fileToCompressedDataURL(file: File, maxWidth = 1920, maxHeight = 1920, quality = 0.85): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

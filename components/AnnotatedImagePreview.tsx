@@ -1,7 +1,8 @@
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { DrawingLine } from '@/lib/types';
+import { getImageRenderRect } from '@/lib/utils';
 
 interface AnnotatedImagePreviewProps {
   imageUrl: string;
@@ -9,6 +10,10 @@ interface AnnotatedImagePreviewProps {
   alt?: string;
   className?: string;
   imgClassName?: string;
+  /** How the image is fitted inside the container (must match the imgClassName object-fit). */
+  objectFit?: 'contain' | 'cover';
+  /** Vertical alignment of the fitted image (object-position). */
+  objectPosition?: 'center' | 'top';
 }
 
 export default function AnnotatedImagePreview({
@@ -17,9 +22,13 @@ export default function AnnotatedImagePreview({
   alt = 'Image',
   className = 'w-full h-full flex-1 min-h-0 overflow-hidden rounded flex items-center justify-center relative',
   imgClassName = 'w-full h-full object-contain pointer-events-none select-none',
+  objectFit = 'contain',
+  objectPosition = 'center',
 }: AnnotatedImagePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
 
   const drawLines = useCallback(() => {
     const canvas = canvasRef.current;
@@ -40,6 +49,12 @@ export default function AnnotatedImagePreview({
 
     if (!lines || lines.length === 0) return;
 
+    // Lines are normalized relative to the visible image — map them onto the
+    // rendered image rect (which excludes letterbox / crop padding).
+    const rect = getImageRenderRect(w, h, naturalSize.width, naturalSize.height, objectFit, objectPosition);
+    const renderW = rect.width || w;
+    const renderH = rect.height || h;
+
     const referenceWidth = 500;
     lines.forEach((l) => {
       if (!l.points || l.points.length < 2) return;
@@ -48,13 +63,13 @@ export default function AnnotatedImagePreview({
 
       const isLineNormalized = !l.points.some((val) => val > 1.05);
       const baseWidth = l.tool === 'eraser' ? 20 : 3;
-      ctx.lineWidth = Math.max(1, baseWidth * (w / referenceWidth));
+      ctx.lineWidth = Math.max(1, baseWidth * (renderW / referenceWidth));
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.globalCompositeOperation = l.tool === 'eraser' ? 'destination-out' : 'source-over';
 
-      const getX = (val: number) => (isLineNormalized ? val * w : val);
-      const getY = (val: number) => (isLineNormalized ? val * h : val);
+      const getX = (val: number) => (isLineNormalized ? rect.x + val * renderW : val);
+      const getY = (val: number) => (isLineNormalized ? rect.y + val * renderH : val);
 
       ctx.moveTo(getX(l.points[0]), getY(l.points[1]));
       if (l.points.length === 2) {
@@ -66,9 +81,13 @@ export default function AnnotatedImagePreview({
       }
       ctx.stroke();
     });
-  }, [lines]);
+  }, [lines, naturalSize, objectFit, objectPosition]);
 
   useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete) {
+      setNaturalSize({ width: img.naturalWidth || 0, height: img.naturalHeight || 0 });
+    }
     drawLines();
 
     const container = containerRef.current;
@@ -85,9 +104,16 @@ export default function AnnotatedImagePreview({
     <div ref={containerRef} className={className}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={imgRef}
         src={imageUrl}
         alt={alt}
-        onLoad={drawLines}
+        onLoad={() => {
+          const img = imgRef.current;
+          if (img) {
+            setNaturalSize({ width: img.naturalWidth || 0, height: img.naturalHeight || 0 });
+          }
+          drawLines();
+        }}
         className={imgClassName}
         draggable={false}
       />

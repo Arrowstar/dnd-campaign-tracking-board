@@ -2,6 +2,9 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { DrawingLine } from '@/lib/types';
+import { getImageRenderRect } from '@/lib/utils';
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 interface ImageDrawerProps {
   imageUrl: string;
@@ -95,33 +98,15 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     setTimeout(syncCanvasSize, 0);
   };
 
-  // Calculate the scaled width and height that fills the container up to its bounds while preserving aspect ratio
-  const getRenderSize = () => {
-    if (naturalSize.width === 0 || naturalSize.height === 0 || containerSize.width === 0 || containerSize.height === 0) {
-      return { width: '100%', height: 'auto' };
-    }
-
-    const imgRatio = naturalSize.width / naturalSize.height;
-    const containerRatio = containerSize.width / containerSize.height;
-
-    let renderWidth, renderHeight;
-    if (imgRatio > containerRatio) {
-      // Image is wider than container ratio: fit to container width
-      renderWidth = containerSize.width;
-      renderHeight = containerSize.width / imgRatio;
-    } else {
-      // Image is taller than container ratio: fit to container height
-      renderWidth = containerSize.height * imgRatio;
-      renderHeight = containerSize.height;
-    }
-
-    return { 
-      width: `${renderWidth}px`, 
-      height: `${renderHeight}px` 
-    };
-  };
-
-  const renderSize = getRenderSize();
+  // The visible image may be letterboxed inside the container — this is the
+  // rectangle (in container CSS pixels) the image actually occupies.
+  const imageRect = getImageRenderRect(
+    containerSize.width,
+    containerSize.height,
+    naturalSize.width,
+    naturalSize.height,
+    'contain',
+  );
 
   // Draw all lines whenever lines change, current line updates, or canvas resizes
   useEffect(() => {
@@ -135,7 +120,10 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+
+    const renderW = imageRect.width || canvas.width;
+    const renderH = imageRect.height || canvas.height;
+
     const drawLine = (l: DrawingLine) => {
       if (l.points.length < 2) return;
       ctx.beginPath();
@@ -144,10 +132,10 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
       // Check if points are normalized (usually all points are in range [0..1.05])
       const isLineNormalized = !l.points.some(val => val > 1.05);
 
-      // Scale line width proportionally to canvas size, using 500px as reference
+      // Scale line width proportionally to the rendered image size, using 500px as reference
       const referenceWidth = 500;
       const baseWidth = l.tool === 'eraser' ? 20 : 3;
-      ctx.lineWidth = Math.max(1, baseWidth * (canvas.width / referenceWidth));
+      ctx.lineWidth = Math.max(1, baseWidth * (renderW / referenceWidth));
       
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -155,8 +143,8 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
       // Eraser uses destination-out to erase
       ctx.globalCompositeOperation = l.tool === 'eraser' ? 'destination-out' : 'source-over';
       
-      const getX = (val: number) => isLineNormalized ? val * canvas.width : val;
-      const getY = (val: number) => isLineNormalized ? val * canvas.height : val;
+      const getX = (val: number) => isLineNormalized ? imageRect.x + val * renderW : val;
+      const getY = (val: number) => isLineNormalized ? imageRect.y + val * renderH : val;
 
       ctx.moveTo(getX(l.points[0]), getY(l.points[1]));
       if (l.points.length === 2) {
@@ -171,16 +159,19 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     
     lines.forEach(drawLine);
     if (currentLine) drawLine(currentLine);
-  }, [lines, currentLine, canvasSize]);
+  }, [lines, currentLine, canvasSize, containerSize, naturalSize, imageRect]);
 
   const getPointerPos = (e: React.PointerEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    // Return relative coordinates normalized between 0 and 1
+    const cRect = canvas.getBoundingClientRect();
+    // Return relative coordinates normalized to the visible image rect (0..1),
+    // not the whole container, so stored lines stay aligned with the image.
+    const px = e.clientX - cRect.left;
+    const py = e.clientY - cRect.top;
     return {
-      x: rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0,
-      y: rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0
+      x: imageRect.width > 0 ? (px - imageRect.x) / imageRect.width : 0,
+      y: imageRect.height > 0 ? (py - imageRect.y) / imageRect.height : 0
     };
   };
 
@@ -188,12 +179,14 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     if (!canEdit) return;
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
-    setIsDrawing(true);
     const pos = getPointerPos(e);
+    // Ignore strokes that start outside the visible image (letterbox area)
+    if (pos.x < 0 || pos.x > 1 || pos.y < 0 || pos.y > 1) return;
+    setIsDrawing(true);
     setCurrentLine({
       tool,
       color,
-      points: [pos.x, pos.y]
+      points: [clamp01(pos.x), clamp01(pos.y)]
     });
   };
 
@@ -204,7 +197,7 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     const pos = getPointerPos(e);
     setCurrentLine({
       ...currentLine,
-      points: [...currentLine.points, pos.x, pos.y]
+      points: [...currentLine.points, clamp01(pos.x), clamp01(pos.y)]
     });
   };
 

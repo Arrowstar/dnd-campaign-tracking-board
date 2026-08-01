@@ -401,11 +401,13 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
     if (mode === 'thumb') {
       return (
         <div style={spanStyle} className="min-h-0">
-          <img
-            src={imageUrl}
+          <AnnotatedImagePreview
+            imageUrl={imageUrl}
+            lines={field?.lines}
             alt="NPC portrait"
-            draggable={false}
-            className="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            imgClassName="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            objectFit="cover"
+            objectPosition="top"
           />
         </div>
       );
@@ -417,6 +419,8 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           lines={field?.lines}
           alt="NPC portrait"
           imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
+          objectFit="cover"
+          objectPosition="top"
         />
       </div>
     );
@@ -429,11 +433,13 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
     if (mode === 'thumb') {
       return (
         <div style={spanStyle} className="min-h-0">
-          <img
-            src={imageUrl}
+          <AnnotatedImagePreview
+            imageUrl={imageUrl}
+            lines={field?.lines}
             alt={fieldLabel}
-            draggable={false}
-            className="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            imgClassName="w-full h-[72px] object-cover object-top rounded pointer-events-none select-none"
+            objectFit="cover"
+            objectPosition="top"
           />
         </div>
       );
@@ -445,6 +451,8 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           lines={field?.lines}
           alt={fieldLabel}
           imgClassName="w-full h-[140px] object-cover object-top pointer-events-none select-none"
+          objectFit="cover"
+          objectPosition="top"
         />
       </div>
     );
