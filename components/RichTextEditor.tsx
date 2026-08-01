@@ -697,7 +697,13 @@ export function flattenRichTextForPreview(html: string): string {
           .replace(/\u0000+/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
-        return `<${cellTag}>${text}</${cellTag}>`;
+        // Preserve colspan/rowspan so merged cells keep their span on the
+        // canvas preview, matching what the rich text editor shows.
+        const openTag = cell.match(/^<t[dh][^>]*>/i)?.[0] ?? '';
+        const spans = (openTag.match(/\b(colspan|rowspan)\s*=\s*["']\d+["']/gi) ?? [])
+          .filter(attr => Number(attr.match(/\d+/)?.[0]) > 1)
+          .join(' ');
+        return `<${cellTag}${spans ? ` ${spans}` : ''}>${text}</${cellTag}>`;
       });
       return `<tr>${inner.join('')}</tr>`;
     });
