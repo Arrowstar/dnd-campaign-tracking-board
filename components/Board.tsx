@@ -564,7 +564,8 @@ export default function Board({ boardId }: { boardId: string }) {
       const activeEl = document.activeElement;
       if (
         activeEl &&
-        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable)
+        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'BUTTON' ||
+         activeEl.tagName === 'A' || (activeEl as HTMLElement).isContentEditable)
       ) {
         const target = e.target as Node | null;
         if (target && activeEl !== target && !activeEl.contains(target)) {
@@ -867,12 +868,16 @@ export default function Board({ boardId }: { boardId: string }) {
 
   useEffect(() => {
     latestKeyHandlerRef.current = (e: KeyboardEvent) => {
-      const isTypingTarget = (el: Element | null) =>
-        !!el &&
-        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
-         el.tagName === 'BUTTON' || el.tagName === 'A' || (el as HTMLElement).isContentEditable);
-
-      if (isTypingTarget(document.activeElement)) return;
+      const activeEl = document.activeElement;
+      // Only true typing contexts block shortcuts — a lingering focused button
+      // (e.g. after clicking the sidebar "Add" button) must NOT disable them.
+      const isFormField =
+        !!activeEl &&
+        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' ||
+         (activeEl as HTMLElement).isContentEditable);
+      if (isFormField) return;
+      // A focused button/link owns the Enter key — let it activate natively.
+      if (e.key === 'Enter' && activeEl && (activeEl.tagName === 'BUTTON' || activeEl.tagName === 'A')) return;
       if (showMembersModal || showUserSettingsModal) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
