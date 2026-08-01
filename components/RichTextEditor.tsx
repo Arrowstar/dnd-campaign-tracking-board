@@ -285,14 +285,10 @@ export function RichTextEditor({
       } ${className}`}
       onPointerDown={stopPropagation}
       onPointerDownCapture={stopPropagation}
-      onPointerUp={stopPropagation}
       onMouseDown={stopPropagation}
       onMouseDownCapture={stopPropagation}
-      onMouseUp={stopPropagation}
       onClick={stopPropagation}
       onDoubleClick={stopPropagation}
-      onTouchStart={stopPropagation}
-      onTouchEnd={stopPropagation}
     >
       {/* Rich Text Toolbar */}
       <div
