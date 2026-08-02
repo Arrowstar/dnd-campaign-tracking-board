@@ -24,12 +24,14 @@ import {
   Eye,
   Lock,
   ChevronDown,
+  Crop as CropIcon,
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
-import { uploadFileToBlob } from '@/lib/utils';
+import { uploadFileToBlob, transformLinesForCrop, CropRect } from '@/lib/utils';
 import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
 import UploadProgress from './UploadProgress';
+import ImageCropModal from './ImageCropModal';
 import {
   parseTokens,
   addLinkToValue,
@@ -257,6 +259,8 @@ export default function StructuredBoardItemFields({
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   // Per-field in-flight upload progress.
   const [uploadState, setUploadState] = useState<Record<string, { label: string; percent: number; error: string | null }>>({});
+  // Crop modal state: field id + image url being re-cropped.
+  const [cropTarget, setCropTarget] = useState<{ fieldId: string; imageUrl: string } | null>(null);
 
   const setFieldProgress = (fieldId: string, patch: Partial<{ label: string; percent: number; error: string | null }>) => {
     setUploadState(prev => ({
@@ -348,6 +352,22 @@ export default function StructuredBoardItemFields({
       setTimeout(() => clearFieldProgress(fieldId), 6000);
     }
     e.target.value = '';
+  };
+
+  const handleCropApply = async ({ file, cropRect }: { file: File; cropRect: CropRect }) => {
+    if (!cropTarget) return;
+    try {
+      const url = await uploadFileToBlob(file);
+      const field = fields.find((f) => f.id === cropTarget.fieldId);
+      handleUpdateField(cropTarget.fieldId, {
+        imageUrl: url,
+        lines: transformLinesForCrop(field?.lines, cropRect),
+      });
+      setCropTarget(null);
+    } catch (err) {
+      console.error('Error uploading cropped image field:', err);
+      alert(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
+    }
   };
 
   const handleImageDrop = async (fieldId: string, e: React.DragEvent) => {
@@ -1039,6 +1059,7 @@ export default function StructuredBoardItemFields({
   const renderImageField = (field: ItemField) => {
     const isDragging = draggingFieldId === field.id;
     return (
+      <>
       <div
         className={`flex flex-col gap-2 p-2.5 transition-all duration-200 rounded-lg relative ${
           isDragging ? 'bg-amber-500/10 ring-2 ring-[#B58D3D] border-[#B58D3D]' : ''
@@ -1082,10 +1103,15 @@ export default function StructuredBoardItemFields({
                 <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleUpdateField(field.id, { imageUrl: '' }); }} className="text-red-600 hover:text-red-700 font-bold hover:underline flex items-center gap-1 cursor-pointer">
                   <X size={10} /><span>Remove Image</span>
                 </button>
-                <label onPointerDown={(e) => e.stopPropagation()} className="text-[#2C2824] hover:text-[#B58D3D] font-bold cursor-pointer flex items-center gap-1">
-                  <Upload size={10} /><span>Replace File</span>
-                  <input type="file" accept="image/*" onChange={(e) => handleImageFileUpload(field.id, e)} className="hidden" />
-                </label>
+                <div className="flex items-center gap-2">
+                  <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setCropTarget({ fieldId: field.id, imageUrl: field.imageUrl || '' }); }} className="text-[#2C2824] hover:text-[#B58D3D] font-bold flex items-center gap-1 cursor-pointer">
+                    <CropIcon size={10} /><span>Crop</span>
+                  </button>
+                  <label onPointerDown={(e) => e.stopPropagation()} className="text-[#2C2824] hover:text-[#B58D3D] font-bold cursor-pointer flex items-center gap-1">
+                    <Upload size={10} /><span>Replace File</span>
+                    <input type="file" accept="image/*" onChange={(e) => handleImageFileUpload(field.id, e)} className="hidden" />
+                  </label>
+                </div>
               </div>
             )}
           </div>
@@ -1137,6 +1163,15 @@ export default function StructuredBoardItemFields({
           </div>
         )}
       </div>
+      {cropTarget?.fieldId === field.id && canEdit && (
+        <ImageCropModal
+          open={!!cropTarget}
+          imageUrl={cropTarget.imageUrl}
+          onCancel={() => setCropTarget(null)}
+          onApply={handleCropApply}
+        />
+      )}
+      </>
     );
   };
 

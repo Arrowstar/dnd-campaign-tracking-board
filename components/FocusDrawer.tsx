@@ -6,7 +6,7 @@ import {
   X, ChevronRight, Settings, Trash2, MessageSquare, Globe, Eye, Lock,
   User as UserIcon, Send, Edit3, Check, GripVertical,
   Upload, Link as LinkIcon, Image as ImageIcon,
-  ChevronUp, ChevronDown, SlidersHorizontal,
+  ChevronUp, ChevronDown, SlidersHorizontal, Crop as CropIcon,
 } from 'lucide-react';
 import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
@@ -25,8 +25,9 @@ import {
 import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
-import { uploadFileToBlob } from '@/lib/utils';
+import { uploadFileToBlob, transformLinesForCrop, CropRect } from '@/lib/utils';
 import UploadProgress from './UploadProgress';
+import ImageCropModal from './ImageCropModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1067,6 +1068,23 @@ function ImageBoardItemContent({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   // In-flight blob upload progress, shown over the image zone.
   const [upload, setUpload] = useState<{ label: string; percent: number; error: string | null } | null>(null);
+  // Crop modal state (re-cropping the current image).
+  const [cropOpen, setCropOpen] = useState(false);
+
+  const handleCropApply = async ({ file, cropRect }: { file: File; cropRect: CropRect }) => {
+    try {
+      const imageUrl = await uploadFileToBlob(file);
+      onUpdate({
+        ...item,
+        content: imageUrl,
+        lines: transformLinesForCrop(item.lines, cropRect),
+      });
+      setCropOpen(false);
+    } catch (err) {
+      console.error('Error uploading cropped image:', err);
+      alert(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1158,6 +1176,15 @@ function ImageBoardItemContent({
                     <span>Replace Image File</span>
                     <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
                   </label>
+                  <button
+                    type="button"
+                    onClick={() => setCropOpen(true)}
+                    className="px-3 py-1.5 bg-white hover:bg-[#F5F2ED] text-[#423D38] border border-[#D9D0C1] hover:border-[#B58D3D] font-bold rounded flex items-center gap-1.5 cursor-pointer transition-colors text-xs shadow-xs"
+                    title="Crop the image to only show the desired portion"
+                  >
+                    <CropIcon size={13} />
+                    <span>Crop</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1286,6 +1313,14 @@ function ImageBoardItemContent({
             </div>
           )}
         </div>
+      )}
+      {item.content && canEdit && (
+        <ImageCropModal
+          open={cropOpen}
+          imageUrl={item.content}
+          onCancel={() => setCropOpen(false)}
+          onApply={handleCropApply}
+        />
       )}
     </div>
   );

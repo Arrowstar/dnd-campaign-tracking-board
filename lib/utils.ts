@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { upload as uploadFileToBlobStore } from "@vercel/blob/client"
+import type { DrawingLine } from './types'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -47,6 +48,56 @@ export function getImageRenderRect(
     width,
     height,
   };
+}
+
+/** Normalized crop rectangle (0..1) relative to an image's native space. */
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Remap drawing annotations (normalized to the full image) into a new
+ * coordinate space. `cropRect` expresses the desired crop as normalized
+ * offsets within the ORIGINAL image (e.g. from ImageCropModal). Points
+ * outside the crop region are dropped; surviving lines keep the shorthand
+ * [x0,y0,x1,y1,...] format and are re-normalized/clamped to 0..1.
+ *
+ * When the crop covers the entire image (no-op) the original lines array is
+ * returned unchanged so no accidental mutation/rewrites happen.
+ */
+export function transformLinesForCrop(lines: DrawingLine[] | undefined, cropRect: CropRect): DrawingLine[] | undefined {
+  if (!lines || lines.length === 0) return lines;
+  const { x, y, width, height } = cropRect;
+
+  const almostFull =
+    x <= 0.0001 &&
+    y <= 0.0001 &&
+    width >= 0.9999 &&
+    height >= 0.9999;
+  if (almostFull) return lines;
+
+  const out: DrawingLine[] = [];
+  for (const line of lines) {
+    const pts = line.points;
+    if (!pts || pts.length < 2) continue;
+    const newPts: number[] = [];
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      const px = pts[i];
+      const py = pts[i + 1];
+      if (px < x || px > x + width || py < y || py > y + height) continue;
+      newPts.push(
+        Math.min(1, Math.max(0, (px - x) / width)),
+        Math.min(1, Math.max(0, (py - y) / height)),
+      );
+    }
+    if (newPts.length >= 2) {
+      out.push({ ...line, points: newPts });
+    }
+  }
+  return out;
 }
 
 export function fileToCompressedDataURL(file: File, maxWidth = 1920, maxHeight = 1920, quality = 0.85): Promise<string> {
