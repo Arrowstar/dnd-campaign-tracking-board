@@ -306,7 +306,18 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 relative" ref={containerRef} onPointerDown={e => e.stopPropagation()}>
+    <div
+      className="flex flex-col flex-1 min-h-0 relative"
+      ref={containerRef}
+      // When masked the image is out of flow, so give the drawer a stable
+      // height from the crop region's aspect ratio. Without this, auto-height
+      // parents (e.g. image fields in the NPC/structured sheets) collapse the
+      // wrap to zero when the mask activates; the ResizeObserver then reports
+      // 0, geometry goes null, the image renders in-flow again, and the cycle
+      // repeats — the whole area flickers.
+      style={isMasked && geometry ? { aspectRatio: `${geometry.regionAspect} / 1` } : undefined}
+      onPointerDown={e => e.stopPropagation()}
+    >
       {canEdit && (
         <div className="flex gap-2 p-2 bg-neutral-900 rounded border border-neutral-700 absolute top-2 right-2 z-10 shadow">
           <button 
