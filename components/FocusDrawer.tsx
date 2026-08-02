@@ -807,6 +807,7 @@ function hasPreviewContent(item: BoardItemType, slot: PreviewFieldSlot, fieldTyp
   if (item.type === 'image' && slot.fieldId === '__image_content__') return !!item.content;
   const field = item.fields?.find(f => f.id === slot.fieldId);
   if (!field) return false;
+  if (field.type === 'file') return (field.files?.length ?? 0) > 0;
   if (fieldType === 'image') return !!field.imageUrl;
   if (fieldType === 'structured') {
     if (item.type === 'npc' && slot.fieldId === 'npc-personality-traits') {

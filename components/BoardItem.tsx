@@ -8,7 +8,7 @@ import {
   Trash2, MessageSquare, Lock, Globe, Eye,
   User as UserIcon, Minimize2, Maximize2, ExternalLink, Upload,
   Image as ImageIcon, MapPin, Users, CalendarDays, FileText,
-  BookOpen, Package, Clock, Crown, ScrollText,
+  BookOpen, Package, Clock, Crown, ScrollText, File,
 } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import UploadProgress from './UploadProgress';
@@ -514,6 +514,33 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
             <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(e.value)}</span>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  // ── File field — list attached files & links ──
+  // File fields store data in `field.files` (not textValue/imageUrl), so they
+  // need their own branch. Otherwise they fall through the text branch below,
+  // which reads textValue and renders nothing.
+  if (def?.type === 'file' || field?.type === 'file') {
+    const files = field?.files;
+    if (!files || files.length === 0) return null;
+    const shown = mode === 'expanded' ? files : files.slice(0, 3);
+    return (
+      <div style={spanStyle} className="flex flex-col gap-0.5 min-h-0">
+        <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={fieldLabel}>
+          {fieldLabel}
+        </span>
+        <div className="flex flex-col gap-0.5 min-h-0">
+          {shown.map(file => (
+            <div key={file.id} className="flex items-center gap-1 min-w-0">
+              <File size={9} className="text-[#B58D3D] flex-shrink-0" />
+              <span className="truncate text-[10px] leading-snug opacity-90 flex-1 min-w-0" title={file.name}>
+                {file.name}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
