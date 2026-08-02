@@ -8,7 +8,7 @@ import {
   Upload, Link as LinkIcon, Image as ImageIcon,
   ChevronUp, ChevronDown, SlidersHorizontal,
 } from 'lucide-react';
-import { BoardItem as BoardItemType, User, PreviewFieldSlot, PreviewFieldMode, PreviewLayout } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import NpcBoardItemFields from './NpcBoardItemFields';
 import StructuredBoardItemFields, { FieldDef, parseStructured } from './StructuredBoardItemFields';
@@ -569,6 +569,19 @@ export default function FocusDrawer({
                       onPatch={patchPreviewSlot}
                     />
                   ))}
+                  {customPreviewFields(item, fieldDefs.map(def => def.id)).map(f => (
+                    <PreviewFieldRow
+                      key={f.id}
+                      id={f.id}
+                      label={f.label}
+                      fieldType={f.type === 'image' ? 'image' : 'text'}
+                      fieldVis={f.visibility}
+                      layout={previewLayout}
+                      onToggle={togglePreviewField}
+                      onMove={movePreviewField}
+                      onPatch={patchPreviewSlot}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="text-xs text-[#8C7B6E] italic">
@@ -783,6 +796,7 @@ function NpcPreviewFieldSelector({ item, layout, onToggle, onMove, onPatch }: {
   onMove: (id: string, direction: -1 | 1) => void;
   onPatch: (id: string, patch: Partial<PreviewFieldSlot>) => void;
 }) {
+  const customFields = customPreviewFields(item, NPC_PREVIEW_FIELD_OPTIONS.map(o => o.id));
   return (
     <div className="flex flex-col gap-2">
       {NPC_PREVIEW_FIELD_OPTIONS.map(def => (
@@ -798,8 +812,27 @@ function NpcPreviewFieldSelector({ item, layout, onToggle, onMove, onPatch }: {
           onPatch={onPatch}
         />
       ))}
+      {customFields.map(f => (
+        <PreviewFieldRow
+          key={f.id}
+          id={f.id}
+          label={f.label}
+          fieldType={f.type === 'image' ? 'image' : 'text'}
+          fieldVis={f.visibility}
+          layout={layout}
+          onToggle={onToggle}
+          onMove={onMove}
+          onPatch={onPatch}
+        />
+      ))}
     </div>
   );
+}
+
+/** User-added fields (not part of the static per-type schema) listed in `coveredIds`. */
+function customPreviewFields(item: BoardItemType, coveredIds: string[]): ItemField[] {
+  const covered = new Set(coveredIds);
+  return (item.fields ?? []).filter(f => !covered.has(f.id));
 }
 
 /** Whether a slot currently has content worth rendering on the card. */
@@ -952,7 +985,7 @@ function MiniFieldBlock({ slot, item, fieldDefs, columns, index, canEdit, drag, 
   drag: { from: number; target: number; active: boolean } | null;
   onPointerDown?: (e: React.PointerEvent) => void;
 }) {
-  const fieldType = classifyPreviewField(slot.fieldId, item.type, fieldDefs);
+  const fieldType = classifyPreviewField(slot.fieldId, item.type, fieldDefs, item.fields);
   const mode = resolveFieldMode(slot, fieldType, columns);
   const span = resolveFieldSpan(slot, fieldType, columns, mode);
   const spanStyle = columns === 1 ? undefined : { gridColumn: `span ${span}` };

@@ -423,7 +423,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
     return <HiddenFieldChip label={field.label} visibility={field.visibility} />;
   }
 
-  const fieldType = classifyPreviewField(fieldId, item.type, fieldDefs);
+  const fieldType = classifyPreviewField(fieldId, item.type, fieldDefs, resolvedFields);
   const def = fieldDefs?.find(d => d.id === fieldId) ?? null;
   const fieldLabel = def?.label ?? field?.label ?? fieldId;
   const mode = resolveFieldMode(slot, fieldType, columns);
@@ -775,16 +775,20 @@ export default memo(function BoardItem({
   // stretch its rows to fill the available height for that to work.
   const hasFillPreview = previewLayout.rows.some(slot =>
     slot.fieldId !== '__image_content__' &&
-    resolveFieldMode(slot, classifyPreviewField(slot.fieldId, item.type, fieldDefs), previewLayout.columns) === 'fill'
+    resolveFieldMode(slot, classifyPreviewField(slot.fieldId, item.type, fieldDefs, item.fields), previewLayout.columns) === 'fill'
   );
 
-  // Merge saved fields with defaults so images always resolve even before drawer is opened
+  // Merge saved fields with defaults so images always resolve even before drawer is opened.
+  // Saved user-added custom fields (which have no FieldDef) are kept alongside the defaults.
   const resolvedFields: ItemField[] = (() => {
     if (item.type === 'npc') return item.fields || [];
     if (!fieldDefs) return item.fields || [];
     const defaults = buildDefaultFields(fieldDefs, item.content);
     const saved = item.fields || [];
-    return defaults.map(def => saved.find(s => s.id === def.id) ?? def);
+    return [
+      ...defaults.map(def => saved.find(s => s.id === def.id) ?? def),
+      ...saved.filter(s => !defaults.some(d => d.id === s.id)),
+    ];
   })();
 
   const thresholds = lodThresholds ?? BOARD_ITEM_DEFAULT_LOD_THRESHOLDS;

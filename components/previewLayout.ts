@@ -1,4 +1,4 @@
-import { BoardItem, PreviewFieldMode, PreviewFieldSlot, PreviewLayout } from '@/lib/types';
+import { BoardItem, ItemField, PreviewFieldMode, PreviewFieldSlot, PreviewLayout } from '@/lib/types';
 import { FieldDef } from './StructuredBoardItemFields';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,20 +23,27 @@ export function getDefaultPreviewFields(type: string, fieldDefs: FieldDef[] | nu
   return defaults[type] ?? (fieldDefs ? [fieldDefs[0]?.id].filter(Boolean) as string[] : []);
 }
 
-/** Classify a preview field id into the three renderable field kinds. */
+/** Classify a field id into the three renderable field kinds. User-added custom
+ *  fields live in item.fields but not in the static FieldDef schema, so consult
+ *  the runtime fields for their actual type when no def matches. */
 export function classifyPreviewField(
   fieldId: string,
   itemType: string,
-  fieldDefs: FieldDef[] | null
+  fieldDefs: FieldDef[] | null,
+  fields?: ItemField[] | null
 ): 'image' | 'text' | 'structured' {
   if (itemType === 'npc') {
     if (fieldId === 'npc-image') return 'image';
     if (fieldId === 'npc-personality-traits') return 'structured';
+    const runtime = fields?.find(f => f.id === fieldId);
+    if (runtime?.type === 'image') return 'image';
     return 'text';
   }
   const def = fieldDefs?.find(d => d.id === fieldId);
   if (def?.type === 'image') return 'image';
   if (def?.type === 'structured') return 'structured';
+  const runtime = fields?.find(f => f.id === fieldId);
+  if (runtime?.type === 'image') return 'image';
   return 'text';
 }
 
