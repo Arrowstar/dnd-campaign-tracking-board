@@ -48,6 +48,8 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
 } from 'lucide-react';
+import { uploadFileToBlob } from '@/lib/utils';
+import UploadProgress from './UploadProgress';
 
 interface RichTextEditorProps {
   value: string;
@@ -152,6 +154,8 @@ export function RichTextEditor({
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextUpdate = useRef(false);
+  // In-flight image upload progress (toolbar "Insert Image").
+  const [imageUpload, setImageUpload] = useState<{ percent: number; error: string | null } | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -257,22 +261,22 @@ export function RichTextEditor({
     editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
   };
 
-  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !editor) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    fetch('/api/upload', { method: 'POST', body: formData })
-      .then(r => r.json())
-      .then(data => {
-        if (data.url) {
-          editor.chain().focus().setImage({ src: data.url }).run();
-        } else if (data.error) {
-          window.alert(`Upload failed: ${data.error}`);
-        }
-      })
-      .catch(err => window.alert(`Upload failed: ${err.message}`));
+    setImageUpload({ percent: 0, error: null });
+    try {
+      const url = await uploadFileToBlob(file, {
+        onProgress: (percent) => setImageUpload(prev => (prev ? { ...prev, percent } : prev)),
+      });
+      editor.chain().focus().setImage({ src: url }).run();
+      setImageUpload(null);
+    } catch (err) {
+      console.error('Rich text image upload failed:', err);
+      setImageUpload(prev => (prev ? { ...prev, percent: 0, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+      setTimeout(() => setImageUpload(null), 6000);
+    }
   };
 
   const selectedFontSize = FONT_SIZES.find(s => isActive('textStyle', { fontSize: s.value }))?.value ?? '14px';
@@ -280,7 +284,7 @@ export function RichTextEditor({
 
   return (
     <div
-      className={`flex flex-col border rounded-md overflow-visible transition-colors ${
+      className={`flex flex-col border rounded-md overflow-visible transition-colors relative ${
         isLight ? 'border-[#D9D0C1] bg-white/70' : 'border-black/20 bg-black/10'
       } ${className}`}
       onPointerDown={stopPropagation}
@@ -290,6 +294,12 @@ export function RichTextEditor({
       onClick={stopPropagation}
       onDoubleClick={stopPropagation}
     >
+      {/* In-flight image upload progress */}
+      {imageUpload && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none">
+          <UploadProgress percent={imageUpload.percent} label="Uploading image" error={imageUpload.error} />
+        </div>
+      )}
       {/* Rich Text Toolbar */}
       <div
         className={`flex flex-wrap items-center gap-0.5 p-1 border-b select-none ${
@@ -478,7 +488,13 @@ export function RichTextEditor({
         {/* Link & Image */}
         <ToolbarButton onClick={setLink} active={isActive('link')} title="Link (Ctrl+K)" icon={<LinkIcon size={13} />} />
         {!compact && (
-          <ToolbarButton onClick={() => fileInputRef.current?.click()} title="Insert Image" icon={<ImageIcon size={13} />} />
+          <ToolbarButton
+            onClick={() => {
+              if (!imageUpload) fileInputRef.current?.click();
+            }}
+            title={imageUpload ? 'Uploading image…' : 'Insert Image'}
+            icon={<ImageIcon size={13} className={imageUpload ? 'animate-pulse' : ''} />}
+          />
         )}
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
 

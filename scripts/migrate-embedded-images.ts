@@ -1,8 +1,12 @@
 /**
- * One-time migration: finds board items/fields that still have images embedded
- * as base64 data URLs (from before images were routed through Vercel Blob) and
- * replaces them with uploaded Blob URLs, then writes the shrunk tabs back to
- * the DB.
+ * One-time migration: finds board items/fields that still have files or images
+ * embedded as base64 data URLs (from before files were routed through Vercel
+ * Blob) and replaces them with uploaded Blob URLs, then writes the shrunk tabs
+ * back to the DB.
+ *
+ * This covers data URLs of ANY type (image/png, image/jpeg, application/pdf,
+ * text/plain, ...) found in an item's `content`, in an image field's `imageUrl`,
+ * or in an attached file's `url`.
  *
  * This runs as a plain Node script against Postgres + Blob directly — it does
  * NOT go through the /api/boards/[boardId]/state route, so it isn't subject
@@ -27,16 +31,23 @@ import { put } from '@vercel/blob';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
-function isDataImageUrl(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('data:image/');
+function isDataUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('data:');
+}
+
+function extFromMime(mimeType: string): string {
+  const sub = mimeType.split('/')[1]?.toLowerCase() || '';
+  const clean = sub.split(';')[0].split('+')[0];
+  if (/^[a-z0-9]{1,5}$/.test(clean)) return clean;
+  return 'bin';
 }
 
 function parseDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string; ext: string } {
-  const match = /^data:(image\/[a-zA-Z0-9+.-]+);base64,(.*)$/.exec(dataUrl);
+  const match = /^data:([a-zA-Z0-9+./-]+);base64,(.*)$/.exec(dataUrl);
   if (!match) throw new Error('Unrecognized data URL format');
   const mimeType = match[1];
   const buffer = Buffer.from(match[2], 'base64');
-  const ext = mimeType.split('/')[1]?.split('+')[0] || 'bin';
+  const ext = extFromMime(mimeType);
   return { buffer, mimeType, ext };
 }
 
@@ -57,7 +68,7 @@ async function migrateBoard(boardId: string, tabs: any[]): Promise<{ tabs: any[]
   for (const tab of tabs) {
     if (!Array.isArray(tab.items)) continue;
     for (const item of tab.items) {
-      if (isDataImageUrl(item.content)) {
+      if (isDataUrl(item.content)) {
         item.content = DRY_RUN
           ? item.content
           : await uploadDataUrl(item.content, `board ${boardId} / item ${item.id} (content)`);
@@ -66,12 +77,23 @@ async function migrateBoard(boardId: string, tabs: any[]): Promise<{ tabs: any[]
       }
       if (Array.isArray(item.fields)) {
         for (const field of item.fields) {
-          if (isDataImageUrl(field.imageUrl)) {
+          if (isDataUrl(field.imageUrl)) {
             field.imageUrl = DRY_RUN
               ? field.imageUrl
-              : await uploadDataUrl(field.imageUrl, `board ${boardId} / item ${item.id} / field ${field.id}`);
-            if (DRY_RUN) console.log(`  [dry-run] would migrate board ${boardId} / item ${item.id} / field ${field.id}`);
+              : await uploadDataUrl(field.imageUrl, `board ${boardId} / item ${item.id} / field ${field.id} (image)`);
+            if (DRY_RUN) console.log(`  [dry-run] would migrate board ${boardId} / item ${item.id} / field ${field.id} (image)`);
             changed = true;
+          }
+          if (Array.isArray(field.files)) {
+            for (const file of field.files) {
+              if (file && isDataUrl(file.url)) {
+                file.url = DRY_RUN
+                  ? file.url
+                  : await uploadDataUrl(file.url, `board ${boardId} / item ${item.id} / field ${field.id} / file ${file.id || '?'}`);
+                if (DRY_RUN) console.log(`  [dry-run] would migrate board ${boardId} / item ${item.id} / field ${field.id} / file ${file.id || '?'}`);
+                changed = true;
+              }
+            }
           }
         }
       }

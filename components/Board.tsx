@@ -16,6 +16,7 @@ import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles } from '@/lib/crossref';
+import UploadProgress from './UploadProgress';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
@@ -896,6 +897,39 @@ export default function Board({ boardId }: { boardId: string }) {
   // ── Canvas-level image drop (creates a new Image board item) ──────────────
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const canvasDragCounter = useRef(0);
+  // Active blob upload for a dropped file, positioned at the drop point.
+  const [canvasUpload, setCanvasUpload] = useState<{
+    x: number;
+    y: number;
+    label: string;
+    percent: number;
+    error: string | null;
+  } | null>(null);
+
+  // Fail-safe reset for the drop overlay: one of the several events that fire
+  // around a drop (drop on a child card, drag ended outside, cancelled drag,
+  // drop outside any drop target) will always reach the document, so the
+  // "Drop image..." pill can never get stuck.
+  useEffect(() => {
+    const resetCanvasDrag = () => {
+      canvasDragCounter.current = 0;
+      setIsCanvasDragging(false);
+    };
+    const onDocumentDrop = () => resetCanvasDrag();
+    const onDragEnd = () => resetCanvasDrag();
+    const onDocumentDragLeave = (e: DragEvent) => {
+      // Leaving the document entirely (relatedTarget null) hides the overlay.
+      if (!e.relatedTarget) resetCanvasDrag();
+    };
+    document.addEventListener('drop', onDocumentDrop, true);
+    document.addEventListener('dragend', onDragEnd, true);
+    document.addEventListener('dragleave', onDocumentDragLeave, true);
+    return () => {
+      document.removeEventListener('drop', onDocumentDrop, true);
+      document.removeEventListener('dragend', onDragEnd, true);
+      document.removeEventListener('dragleave', onDocumentDragLeave, true);
+    };
+  }, []);
 
   const handleCanvasDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -909,6 +943,10 @@ export default function Board({ boardId }: { boardId: string }) {
     // Convert drop position from screen coords → canvas coords
     const dropCanvasX = (e.clientX - canvasEl.left - positionX) / scale;
     const dropCanvasY = (e.clientY - canvasEl.top - positionY) / scale;
+
+    // Position the progress pill (relative to the viewport wrapper).
+    const pillX = e.clientX - canvasEl.left;
+    const pillY = e.clientY - canvasEl.top;
 
     const newItemBase = {
       id: uuidv4(),
@@ -930,16 +968,25 @@ export default function Board({ boardId }: { boardId: string }) {
 
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      setCanvasUpload({ x: pillX, y: pillY, label: file.name || 'Image', percent: 0, error: null });
       try {
-        const imageUrl = await uploadFileToBlob(file);
+        const imageUrl = await uploadFileToBlob(file, {
+          onProgress: (percent) => {
+            setCanvasUpload(prev => (prev ? { ...prev, percent } : prev));
+          },
+        });
+        setCanvasUpload(null);
         saveState([...items, { ...newItemBase, content: imageUrl }], connections);
       } catch (err) {
         console.error('Error processing canvas-dropped image:', err);
+        setCanvasUpload(prev => (prev ? { ...prev, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+        // Let the user dismiss the error pill after a moment.
+        setTimeout(() => setCanvasUpload(null), 5000);
       }
       return;
     }
     const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('URL');
-    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image/'))) {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       saveState([...items, { ...newItemBase, content: url.trim() }], connections);
     }
   };
@@ -1387,6 +1434,9 @@ export default function Board({ boardId }: { boardId: string }) {
           onDragLeave={(e) => {
             e.preventDefault();
             e.stopPropagation();
+            // Only decrement when the pointer actually leaves this subtree (not
+            // while it is mid-drag over a nested child element).
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
             canvasDragCounter.current -= 1;
             if (canvasDragCounter.current <= 0) {
               canvasDragCounter.current = 0;
@@ -1402,6 +1452,23 @@ export default function Board({ boardId }: { boardId: string }) {
                 <Upload size={18} className="text-[#B58D3D]" />
                 <span>Drop image to create a new board card</span>
               </div>
+            </div>
+          )}
+          {/* In-flight blob upload progress / error, anchored at the drop point */}
+          {canvasUpload && (
+            <div
+              className="absolute z-[55] pointer-events-none"
+              style={{
+                left: canvasUpload.x,
+                top: canvasUpload.y,
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              <UploadProgress
+                percent={canvasUpload.percent}
+                label={`Uploading ${canvasUpload.label}`}
+                error={canvasUpload.error}
+              />
             </div>
           )}
         <TransformWrapper

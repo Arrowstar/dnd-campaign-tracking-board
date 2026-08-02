@@ -26,6 +26,7 @@ import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { uploadFileToBlob } from '@/lib/utils';
+import UploadProgress from './UploadProgress';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1030,16 +1031,24 @@ function ImageBoardItemContent({
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlInputText, setUrlInputText] = useState(item.content?.startsWith('data:') ? '' : item.content || '');
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  // In-flight blob upload progress, shown over the image zone.
+  const [upload, setUpload] = useState<{ label: string; percent: number; error: string | null } | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUpload({ label: file.name || 'Image', percent: 0, error: null });
     try {
-      const imageUrl = await uploadFileToBlob(file);
+      const imageUrl = await uploadFileToBlob(file, {
+        onProgress: (percent) => setUpload(prev => (prev ? { ...prev, percent } : prev)),
+      });
       onUpdate({ ...item, content: imageUrl });
       setShowUrlInput(false);
+      setUpload(null);
     } catch (err) {
       console.error('Error processing uploaded image:', err);
+      setUpload(prev => (prev ? { ...prev, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+      setTimeout(() => setUpload(null), 6000);
     }
     e.target.value = '';
   };
@@ -1050,24 +1059,39 @@ function ImageBoardItemContent({
     setIsDraggingOver(false);
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      setUpload({ label: file.name || 'Image', percent: 0, error: null });
       try {
-        const imageUrl = await uploadFileToBlob(file);
+        const imageUrl = await uploadFileToBlob(file, {
+          onProgress: (percent) => setUpload(prev => (prev ? { ...prev, percent } : prev)),
+        });
         onUpdate({ ...item, content: imageUrl });
         setShowUrlInput(false);
+        setUpload(null);
       } catch (err) {
         console.error('Error processing dropped image:', err);
+        setUpload(prev => (prev ? { ...prev, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+        setTimeout(() => setUpload(null), 6000);
       }
       return;
     }
     const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('URL');
-    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image/'))) {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       onUpdate({ ...item, content: url.trim() });
       setShowUrlInput(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 relative">
+      {upload && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
+          <UploadProgress
+            percent={upload.percent}
+            label={`Uploading ${upload.label}`}
+            error={upload.error}
+          />
+        </div>
+      )}
       {item.content ? (
         <div className="flex flex-col gap-2">
           <div

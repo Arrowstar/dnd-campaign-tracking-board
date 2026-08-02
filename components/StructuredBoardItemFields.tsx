@@ -27,8 +27,9 @@ import {
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
-import { fileToCompressedDataURL, uploadFileToBlob } from '@/lib/utils';
+import { uploadFileToBlob } from '@/lib/utils';
 import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
+import UploadProgress from './UploadProgress';
 import {
   parseTokens,
   addLinkToValue,
@@ -254,6 +255,26 @@ export default function StructuredBoardItemFields({
     fileName?: string;
   } | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
+  // Per-field in-flight upload progress.
+  const [uploadState, setUploadState] = useState<Record<string, { label: string; percent: number; error: string | null }>>({});
+
+  const setFieldProgress = (fieldId: string, patch: Partial<{ label: string; percent: number; error: string | null }>) => {
+    setUploadState(prev => ({
+      ...prev,
+      [fieldId]: {
+        ...(prev[fieldId] || { label: 'Image', percent: 0, error: null as string | null }),
+        ...patch,
+      },
+    }));
+  };
+
+  const clearFieldProgress = (fieldId: string) => {
+    setUploadState(prev => {
+      const next = { ...prev };
+      delete next[fieldId];
+      return next;
+    });
+  };
 
   // Link picker state: tracks which sub-field picker is open
   const [linkPicker, setLinkPicker] = useState<{ fieldId: string; key: string } | null>(null);
@@ -314,11 +335,17 @@ export default function StructuredBoardItemFields({
   const handleImageFileUpload = async (fieldId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
     try {
-      const url = await uploadFileToBlob(file);
+      const url = await uploadFileToBlob(file, {
+        onProgress: (percent) => setFieldProgress(fieldId, { percent }),
+      });
       handleUpdateField(fieldId, { imageUrl: url });
+      clearFieldProgress(fieldId);
     } catch (err) {
       console.error('Error uploading image field:', err);
+      setFieldProgress(fieldId, { error: err instanceof Error ? err.message : 'Upload failed' });
+      setTimeout(() => clearFieldProgress(fieldId), 6000);
     }
     e.target.value = '';
   };
@@ -329,16 +356,22 @@ export default function StructuredBoardItemFields({
     setDraggingFieldId(null);
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
       try {
-        const url = await uploadFileToBlob(file);
+        const url = await uploadFileToBlob(file, {
+          onProgress: (percent) => setFieldProgress(fieldId, { percent }),
+        });
         handleUpdateField(fieldId, { imageUrl: url });
+        clearFieldProgress(fieldId);
       } catch (err) {
         console.error('Error uploading dropped image field:', err);
+        setFieldProgress(fieldId, { error: err instanceof Error ? err.message : 'Upload failed' });
+        setTimeout(() => clearFieldProgress(fieldId), 6000);
       }
       return;
     }
     const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('URL');
-    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image/'))) {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       handleUpdateField(fieldId, { imageUrl: url.trim() });
     }
   };
@@ -348,12 +381,27 @@ export default function StructuredBoardItemFields({
     if (!uploaded || uploaded.length === 0) return;
     const currentField = fields.find((f) => f.id === fieldId);
     const existing = currentField?.files || [];
-    
-    for (const file of Array.from(uploaded)) {
+    const fileList = Array.from(uploaded);
+    const totalBytes = fileList.reduce((sum, f) => sum + f.size, 0) || 1;
+    let completedBytes = 0;
+
+    setFieldProgress(fieldId, { label: `${fileList[0]?.name || 'File'} (1/${fileList.length})`, percent: 0, error: null });
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
       try {
-        const url = await uploadFileToBlob(file);
+        const url = await uploadFileToBlob(file, {
+          onProgress: (percent) => {
+            const overall = Math.min(99, Math.round(((completedBytes + (percent / 100) * file.size) / totalBytes) * 100));
+            setFieldProgress(fieldId, {
+              label: fileList.length > 1 ? `${file.name} (${i + 1}/${fileList.length})` : file.name,
+              percent: overall,
+            });
+          },
+        });
+        completedBytes += file.size;
         const newFile: AttachedFile = {
-          id: 'file-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+          id: 'file-' + crypto.randomUUID(),
           name: file.name,
           url,
           size: file.size,
@@ -362,9 +410,13 @@ export default function StructuredBoardItemFields({
         handleUpdateField(fieldId, { files: [...existing, newFile] });
       } catch (err) {
         console.error('Error uploading document file:', err);
+        setFieldProgress(fieldId, { error: err instanceof Error ? err.message : 'Upload failed' });
+        setTimeout(() => clearFieldProgress(fieldId), 6000);
+        return;
       }
+      e.target.value = '';
     }
-    e.target.value = '';
+    clearFieldProgress(fieldId);
   };
 
   const handleAddFileUrl = (fieldId: string, url: string, customName?: string) => {
@@ -988,7 +1040,7 @@ export default function StructuredBoardItemFields({
     const isDragging = draggingFieldId === field.id;
     return (
       <div
-        className={`flex flex-col gap-2 p-2.5 transition-all duration-200 rounded-lg ${
+        className={`flex flex-col gap-2 p-2.5 transition-all duration-200 rounded-lg relative ${
           isDragging ? 'bg-amber-500/10 ring-2 ring-[#B58D3D] border-[#B58D3D]' : ''
         }`}
         data-interactive="true"
@@ -1006,6 +1058,11 @@ export default function StructuredBoardItemFields({
           if (canEdit) handleImageDrop(field.id, e);
         }}
       >
+        {uploadState[field.id] && (
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
+            <UploadProgress percent={uploadState[field.id].percent} label={`Uploading ${uploadState[field.id].label}`} error={uploadState[field.id].error} />
+          </div>
+        )}
         {field.imageUrl ? (
           <div className="flex flex-col gap-2 relative">
             <div className={`rounded border border-[#D9D0C1] overflow-hidden bg-black/5 relative transition-all ${
@@ -1133,7 +1190,12 @@ export default function StructuredBoardItemFields({
   // Render: File Field
   // ─────────────────────────────────────────────────────────────────────────
   const renderFileField = (field: ItemField) => (
-    <div className="flex flex-col gap-2 p-2.5" data-interactive="true">
+    <div className="flex flex-col gap-2 p-2.5 relative" data-interactive="true">
+      {uploadState[field.id] && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none">
+          <UploadProgress percent={uploadState[field.id].percent} label={`Uploading ${uploadState[field.id].label}`} error={uploadState[field.id].error} />
+        </div>
+      )}
       {(!field.files || field.files.length === 0) ? (
         <div className="text-center py-2 px-3 border border-dashed border-[#D9D0C1] rounded bg-black/5 text-[#8C7B6E] text-xs">No files or links attached yet.</div>
       ) : (

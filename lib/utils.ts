@@ -93,39 +93,63 @@ export function fileToCompressedDataURL(file: File, maxWidth = 1920, maxHeight =
   });
 }
 
-export async function uploadFileToBlob(file: File): Promise<string> {
-  try {
+export interface UploadFileOptions {
+  /** Called periodically with the upload progress as a percentage (0–100). */
+  onProgress?: (percent: number) => void;
+}
+
+/**
+ * Uploads a file to blob storage (Vercel Blob via /api/upload) and resolves
+ * with the public URL.
+ *
+ * Uses XMLHttpRequest so real upload progress can be reported through
+ * `onProgress`. On success the URL is returned; on any failure this throws —
+ * there is deliberately NO base64/data-URL fallback, because embedding raw file
+ * bytes (e.g. a large PDF) into board JSON can exceed the safe save size and
+ * bloat the database. Callers surface the thrown error to the user instead.
+ */
+export async function uploadFileToBlob(file: File, options?: UploadFileOptions): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.url) return data.url;
-      // Server responded 200 but gave no URL — this is the
-      // BLOB_READ_WRITE_TOKEN-missing case from app/api/upload/route.ts.
-      console.error(
-        '[uploadFileToBlob] /api/upload returned no URL — falling back to embedding this image as base64, ' +
-          'which will bloat the saved board. Check that BLOB_READ_WRITE_TOKEN is set on Vercel and redeploy. ' +
-          'Server said:',
-        data.warning || data
-      );
-    } else {
-      const detail = await res.text().catch(() => '');
-      console.error(
-        `[uploadFileToBlob] /api/upload failed (${res.status}) — falling back to embedding this image as base64, ` +
-          'which will bloat the saved board:',
-        detail
-      );
-    }
-  } catch (err) {
-    console.error(
-      '[uploadFileToBlob] Request to /api/upload threw — falling back to embedding this image as base64, ' +
-        'which will bloat the saved board:',
-      err
-    );
-  }
-  return fileToCompressedDataURL(file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+
+    xhr.upload.onprogress = (e) => {
+      if (options?.onProgress && e.lengthComputable) {
+        options.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data && typeof data.url === 'string' && data.url) {
+            resolve(data.url);
+            return;
+          }
+          reject(new Error(data?.error || 'Upload server returned no file URL.'));
+        } catch {
+          reject(new Error('Upload server returned an unreadable response.'));
+        }
+      } else {
+        let message = `Upload failed (HTTP ${xhr.status}).`;
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data?.error) message = data.error;
+        } catch {
+          /* keep default message */
+        }
+        reject(new Error(message));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Upload failed — network error.'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out.'));
+    xhr.onabort = () => reject(new Error('Upload was cancelled.'));
+
+    xhr.send(formData);
+  });
 }

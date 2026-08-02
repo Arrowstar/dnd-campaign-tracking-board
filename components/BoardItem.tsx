@@ -11,6 +11,7 @@ import {
   BookOpen, Package, Clock, Crown, ScrollText,
 } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
+import UploadProgress from './UploadProgress';
 
 import { RichTextDisplay, flattenRichTextForPreview } from './RichTextEditor';
 import { parseStructured, buildDefaultFields } from './StructuredBoardItemFields';
@@ -798,6 +799,12 @@ export default memo(function BoardItem({
 
   // ── Drag-and-drop image onto this card ──────────────────────────────────────
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  // In-flight blob upload for a dropped image, shown over the card.
+  const [cardUpload, setCardUpload] = useState<{
+    label: string;
+    percent: number;
+    error: string | null;
+  } | null>(null);
 
   const handleCardDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -807,8 +814,11 @@ export default memo(function BoardItem({
 
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      setCardUpload({ label: file.name || 'Image', percent: 0, error: null });
       try {
-        const imageUrl = await uploadFileToBlob(file);
+        const imageUrl = await uploadFileToBlob(file, {
+          onProgress: (percent) => setCardUpload(prev => (prev ? { ...prev, percent } : prev)),
+        });
         if (item.type === 'image') {
           onUpdate({ ...item, content: imageUrl });
         } else {
@@ -825,14 +835,17 @@ export default memo(function BoardItem({
             onUpdate({ ...item, content: imageUrl });
           }
         }
+        setCardUpload(null);
       } catch (err) {
         console.error('Error dropping image onto card:', err);
+        setCardUpload(prev => (prev ? { ...prev, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+        setTimeout(() => setCardUpload(null), 6000);
       }
       return;
     }
-    // Handle URL drops
+    // Handle URL drops (http/https only — data: URLs are never persisted).
     const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('URL');
-    if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:image/'))) {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       if (item.type === 'image') {
         onUpdate({ ...item, content: url.trim() });
       } else {
@@ -1318,6 +1331,18 @@ export default memo(function BoardItem({
         </button>
       </div>
       </>)}
+      {/* In-flight blob upload progress / error, centered over the card */}
+      {cardUpload && (
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none"
+        >
+          <UploadProgress
+            percent={cardUpload.percent}
+            label={`Uploading ${cardUpload.label}`}
+            error={cardUpload.error}
+          />
+        </div>
+      )}
     </motion.div>
   );
 });
