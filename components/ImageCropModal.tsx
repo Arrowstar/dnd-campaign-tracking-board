@@ -358,7 +358,7 @@ export default function ImageCropModal({ open, imageUrl, initialCrop, onCancel, 
       onMouseDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
     >
-      <div className="bg-[#2C2824] border border-[#B58D3D] rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl max-h-[90vh] overflow-hidden">
+      <div className="bg-[#2C2824] border border-[#B58D3D] rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#423D38]">
           <span className="text-sm font-bold text-[#E0D8D0]">Crop Image</span>
