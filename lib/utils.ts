@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { upload as uploadFileToBlobStore } from "@vercel/blob/client"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -98,58 +99,41 @@ export interface UploadFileOptions {
   onProgress?: (percent: number) => void;
 }
 
+const MAX_FILE_BYTES = 40 * 1024 * 1024; // must match app/api/upload/route.ts
+
 /**
- * Uploads a file to blob storage (Vercel Blob via /api/upload) and resolves
- * with the public URL.
+ * Uploads a file directly from the browser to blob storage (Vercel Blob) and
+ * resolves with the public URL.
  *
- * Uses XMLHttpRequest so real upload progress can be reported through
- * `onProgress`. On success the URL is returned; on any failure this throws —
- * there is deliberately NO base64/data-URL fallback, because embedding raw file
- * bytes (e.g. a large PDF) into board JSON can exceed the safe save size and
- * bloat the database. Callers surface the thrown error to the user instead.
+ * Uses @vercel/blob/client's `upload` with a `handleUploadUrl` pointing at
+ * /api/upload. The browser first asks that route for a short-lived client token
+ * and then streams the file bytes straight to Blob Storage — the file never
+ * passes through the function's request body, so files far larger than the
+ * ~4.5 MB platform limit (which caused "Upload failed (HTTP 413)") work fine.
+ * Progress is reported through `onProgress`.
+ *
+ * On success the URL is returned; on any failure this throws — there is
+ * deliberately NO base64/data-URL fallback, because embedding raw file bytes
+ * (e.g. a large PDF) into board JSON can exceed the safe save size and bloat
+ * the database. Callers surface the thrown error to the user instead.
  */
 export async function uploadFileToBlob(file: File, options?: UploadFileOptions): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const formData = new FormData();
-    formData.append('file', file);
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(
+      `File is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum upload size is ${Math.round(MAX_FILE_BYTES / (1024 * 1024))} MB.`
+    );
+  }
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload');
-
-    xhr.upload.onprogress = (e) => {
-      if (options?.onProgress && e.lengthComputable) {
-        options.onProgress(Math.round((e.loaded / e.total) * 100));
+  const blob = await uploadFileToBlobStore(file.name || 'upload', file as Blob, {
+    access: 'public',
+    handleUploadUrl: '/api/upload',
+    contentType: file.type || undefined,
+    onUploadProgress: (event) => {
+      if (options?.onProgress) {
+        options.onProgress(Math.max(0, Math.min(100, Math.round(event.percentage ?? 0))));
       }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (data && typeof data.url === 'string' && data.url) {
-            resolve(data.url);
-            return;
-          }
-          reject(new Error(data?.error || 'Upload server returned no file URL.'));
-        } catch {
-          reject(new Error('Upload server returned an unreadable response.'));
-        }
-      } else {
-        let message = `Upload failed (HTTP ${xhr.status}).`;
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (data?.error) message = data.error;
-        } catch {
-          /* keep default message */
-        }
-        reject(new Error(message));
-      }
-    };
-
-    xhr.onerror = () => reject(new Error('Upload failed — network error.'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out.'));
-    xhr.onabort = () => reject(new Error('Upload was cancelled.'));
-
-    xhr.send(formData);
+    },
   });
+
+  return blob.url;
 }
