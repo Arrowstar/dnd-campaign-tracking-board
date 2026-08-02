@@ -10,7 +10,7 @@ interface ImageCropModalProps {
   /** Optional normalized crop rect to preload the frame with (0..1). */
   initialCrop?: CropRect | null;
   onCancel: () => void;
-  onApply: (result: { file: File; cropRect: CropRect }) => void | Promise<void>;
+  onApply: (result: { cropRect: CropRect }) => void | Promise<void>;
 }
 
 type AspectId = 'free' | '1:1' | '4:3' | '16:9';
@@ -328,37 +328,19 @@ export default function ImageCropModal({ open, imageUrl, initialCrop, onCancel, 
   };
 
   const apply = async () => {
-    const img = imgRef.current;
-    if (!img || rect.w <= 0 || rect.h <= 0) return;
-    const nw = img.naturalWidth || img.width;
-    const nh = img.naturalHeight || img.height;
-    const sx = ((crop.x - rect.x) / rect.w) * nw;
-    const sy = ((crop.y - rect.y) / rect.h) * nh;
-    const sw = (crop.w / rect.w) * nw;
-    const sh = (crop.h / rect.h) * nh;
-    if (sw <= 1 || sh <= 1) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    if (crop.w < MIN_SIZE || crop.h < MIN_SIZE) {
       setError('Crop region is too small.');
       return;
     }
-
+    setError('');
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(sw);
-      canvas.height = Math.round(sh);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setError('Could not initialize canvas.');
-        return;
-      }
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Encoding failed'))), 'image/png');
-      });
-      const file = new File([blob], `crop-${Date.now()}.png`, { type: 'image/png' });
       setIsApplying(true);
-      await onApply({ file, cropRect: normalize(crop) });
+      // Mask-only crop: no file is baked or uploaded. The rectangle is stored
+      // as data on the item and the original image is shown through it.
+      await onApply({ cropRect: normalize(crop) });
     } catch (err) {
-      console.error('Crop encoding failed:', err);
+      console.error('Crop apply failed:', err);
       setError(err instanceof Error ? `Unable to crop this image (${err.message})` : 'Unable to crop this image.');
     } finally {
       setIsApplying(false);

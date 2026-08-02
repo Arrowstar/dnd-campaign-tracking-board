@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
-import { uploadFileToBlob, transformLinesForCrop, CropRect } from '@/lib/utils';
+import { uploadFileToBlob, CropRect } from '@/lib/utils';
 import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
 import { FieldVisibilityToggle } from './StructuredBoardItemFields';
 import UploadProgress from './UploadProgress';
@@ -321,20 +321,14 @@ export default function NpcBoardItemFields({
     e.target.value = '';
   };
 
-  const handleCropApply = async ({ file, cropRect }: { file: File; cropRect: CropRect }) => {
+  const handleCropApply = async ({ cropRect }: { cropRect: CropRect }) => {
     if (!cropTarget) return;
-    try {
-      const url = await uploadFileToBlob(file);
-      const field = fields.find((f) => f.id === cropTarget.fieldId);
-      handleUpdateField(cropTarget.fieldId, {
-        imageUrl: url,
-        lines: transformLinesForCrop(field?.lines, cropRect),
-      });
-      setCropTarget(null);
-    } catch (err) {
-      console.error('Error uploading cropped NPC image:', err);
-      alert(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
-    }
+    // Mask-only crop: keep the original imageUrl and store the kept rectangle.
+    // Drawing lines stay in the original image's coordinate space.
+    handleUpdateField(cropTarget.fieldId, {
+      crop: cropRect,
+    });
+    setCropTarget(null);
   };
 
   const handleImageDrop = async (fieldId: string, e: React.DragEvent) => {
@@ -1025,6 +1019,7 @@ export default function NpcBoardItemFields({
                             <ImageDrawer
                               imageUrl={field.imageUrl}
                               lines={field.lines || []}
+                              crop={field.crop ?? null}
                               onLinesChange={(lines) => handleUpdateField(field.id, { lines })}
                               canEdit={canEdit}
                             />
@@ -1118,12 +1113,13 @@ export default function NpcBoardItemFields({
                       )}
                     </div>
                     {cropTarget?.fieldId === field.id && canEdit && (
-                      <ImageCropModal
-                        open={!!cropTarget}
-                        imageUrl={cropTarget.imageUrl}
-                        onCancel={() => setCropTarget(null)}
-                        onApply={handleCropApply}
-                      />
+<ImageCropModal
+                          open={!!cropTarget}
+                          imageUrl={cropTarget.imageUrl}
+                          initialCrop={field.crop ?? null}
+                          onCancel={() => setCropTarget(null)}
+                          onApply={handleCropApply}
+                        />
                     )}
                     </>
                   );

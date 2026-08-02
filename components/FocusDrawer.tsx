@@ -25,7 +25,7 @@ import {
 import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
-import { uploadFileToBlob, transformLinesForCrop, CropRect } from '@/lib/utils';
+import { uploadFileToBlob, CropRect } from '@/lib/utils';
 import UploadProgress from './UploadProgress';
 import ImageCropModal from './ImageCropModal';
 
@@ -1071,19 +1071,14 @@ function ImageBoardItemContent({
   // Crop modal state (re-cropping the current image).
   const [cropOpen, setCropOpen] = useState(false);
 
-  const handleCropApply = async ({ file, cropRect }: { file: File; cropRect: CropRect }) => {
-    try {
-      const imageUrl = await uploadFileToBlob(file);
-      onUpdate({
-        ...item,
-        content: imageUrl,
-        lines: transformLinesForCrop(item.lines, cropRect),
-      });
-      setCropOpen(false);
-    } catch (err) {
-      console.error('Error uploading cropped image:', err);
-      alert(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
-    }
+  const handleCropApply = async ({ cropRect }: { cropRect: CropRect }) => {
+    // Mask-only crop: keep the original image (content) and store the kept
+    // rectangle. Drawing lines stay in the original image's coordinate space.
+    onUpdate({
+      ...item,
+      crop: cropRect,
+    });
+    setCropOpen(false);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1157,6 +1152,7 @@ function ImageBoardItemContent({
             <ImageDrawer
               imageUrl={item.content}
               lines={item.lines || []}
+              crop={item.crop ?? null}
               onLinesChange={lines => onUpdate({ ...item, lines })}
               canEdit={canEdit}
             />
@@ -1318,6 +1314,7 @@ function ImageBoardItemContent({
         <ImageCropModal
           open={cropOpen}
           imageUrl={item.content}
+          initialCrop={item.crop ?? null}
           onCancel={() => setCropOpen(false)}
           onApply={handleCropApply}
         />

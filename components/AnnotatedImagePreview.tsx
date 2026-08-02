@@ -1,12 +1,13 @@
 'use client';
 
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { DrawingLine } from '@/lib/types';
-import { getImageRenderRect } from '@/lib/utils';
+import { DrawingLine, CropRect } from '@/lib/types';
+import { getImageRenderRect, cropMaskStyle, isFullCrop, transformLinesForCrop } from '@/lib/utils';
 
 interface AnnotatedImagePreviewProps {
   imageUrl: string;
   lines?: DrawingLine[];
+  crop?: CropRect | null;
   alt?: string;
   className?: string;
   imgClassName?: string;
@@ -19,6 +20,7 @@ interface AnnotatedImagePreviewProps {
 export default function AnnotatedImagePreview({
   imageUrl,
   lines,
+  crop,
   alt = 'Image',
   className = 'w-full h-full flex-1 min-h-0 overflow-hidden rounded flex items-center justify-center relative',
   imgClassName = 'w-full h-full object-contain pointer-events-none select-none',
@@ -49,14 +51,20 @@ export default function AnnotatedImagePreview({
 
     if (!lines || lines.length === 0) return;
 
-    // Lines are normalized relative to the visible image — map them onto the
-    // rendered image rect (which excludes letterbox / crop padding).
-    const rect = getImageRenderRect(w, h, naturalSize.width, naturalSize.height, objectFit, objectPosition);
+    // Lines are stored normalized to the ORIGINAL image. When a mask is
+    // active, remap them into the crop's coordinate space for display (points
+    // outside the mask are dropped). The mask fills the whole container, so the
+    // crop-space lines map across the full canvas.
+    const isMasked = !!crop && !isFullCrop(crop);
+    const rect = isMasked
+      ? { x: 0, y: 0, width: w, height: h }
+      : getImageRenderRect(w, h, naturalSize.width, naturalSize.height, objectFit, objectPosition);
     const renderW = rect.width || w;
     const renderH = rect.height || h;
+    const drawLinesArr = isMasked ? transformLinesForCrop(lines, crop) ?? [] : lines;
 
     const referenceWidth = 500;
-    lines.forEach((l) => {
+    drawLinesArr.forEach((l) => {
       if (!l.points || l.points.length < 2) return;
       ctx.beginPath();
       ctx.strokeStyle = l.color;
@@ -81,7 +89,7 @@ export default function AnnotatedImagePreview({
       }
       ctx.stroke();
     });
-  }, [lines, naturalSize, objectFit, objectPosition]);
+  }, [lines, crop, naturalSize, objectFit, objectPosition]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -100,6 +108,8 @@ export default function AnnotatedImagePreview({
     return () => ro.disconnect();
   }, [drawLines, imageUrl, lines]);
 
+  const isMasked = !!crop && !isFullCrop(crop);
+
   return (
     <div ref={containerRef} className={className}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -107,6 +117,7 @@ export default function AnnotatedImagePreview({
         ref={imgRef}
         src={imageUrl}
         alt={alt}
+        style={isMasked ? { ...cropMaskStyle(crop!), objectFit: 'contain' } : undefined}
         onLoad={() => {
           const img = imgRef.current;
           if (img) {

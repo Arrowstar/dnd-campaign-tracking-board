@@ -1,7 +1,10 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { upload as uploadFileToBlobStore } from "@vercel/blob/client"
-import type { DrawingLine } from './types'
+import type { CSSProperties } from 'react'
+import type { DrawingLine, CropRect } from './types'
+
+export type { CropRect } from './types'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -50,12 +53,56 @@ export function getImageRenderRect(
   };
 }
 
-/** Normalized crop rectangle (0..1) relative to an image's native space. */
-export interface CropRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+/**
+ * CSS to show the kept rectangle of an image instead of a separate cropped
+ * blob: the image element is blown up so the crop region fills the parent and
+ * shifted so the crop's origin sits at the top-left. Use inside an
+ * `overflow-hidden` wrapper. (`width`/`height`/`transform` percentages are
+ * relative to the image element's own box.)
+ */
+export function cropMaskStyle(crop: CropRect): CSSProperties {
+  return {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: `calc(100% / ${crop.width})`,
+    height: `calc(100% / ${crop.height})`,
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transformOrigin: '0 0',
+    transform: `translate(${-(crop.x ?? 0) * 100}%, ${-(crop.y ?? 0) * 100}%)`,
+  };
+}
+
+/** True when there is no meaningful mask (absent, null, or covering ~everything). */
+export function isFullCrop(crop?: CropRect | null): boolean {
+  return (
+    !crop ||
+    (crop.x <= 0.0001 &&
+      crop.y <= 0.0001 &&
+      crop.width >= 0.9999 &&
+      crop.height >= 0.9999)
+  );
+}
+
+/**
+ * Map a point from the ORIGINAL image's normalized space into a normalized
+ * crop (mask) space (0..1 within the kept rectangle). Out-of-crop points land
+ * outside the 0..1 range and should be dropped by callers.
+ */
+export function pointToCropSpace(x: number, y: number, crop: CropRect): { x: number; y: number } {
+  return {
+    x: (x - crop.x) / crop.width,
+    y: (y - crop.y) / crop.height,
+  };
+}
+
+/** Inverse of {@link pointToCropSpace}: crop-space coords back into original space. */
+export function pointFromCropSpace(x: number, y: number, crop: CropRect): { x: number; y: number } {
+  return {
+    x: crop.x + x * crop.width,
+    y: crop.y + y * crop.height,
+  };
 }
 
 /**

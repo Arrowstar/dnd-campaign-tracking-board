@@ -10,7 +10,8 @@ import {
   Image as ImageIcon, MapPin, Users, CalendarDays, FileText,
   BookOpen, Package, Clock, Crown, ScrollText, File,
 } from 'lucide-react';
-import { uploadFileToBlob } from '@/lib/utils';
+import { uploadFileToBlob, cropMaskStyle, isFullCrop } from '@/lib/utils';
+import type { CropRect } from '@/lib/types';
 import UploadProgress from './UploadProgress';
 
 import { RichTextDisplay, flattenRichTextForPreview } from './RichTextEditor';
@@ -318,6 +319,7 @@ interface PrimaryImagePreview {
   imageUrl: string;
   alt: string;
   objectClassName: string;
+  crop?: CropRect | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -410,6 +412,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
         <AnnotatedImagePreview
           imageUrl={item.content}
           lines={item.lines}
+          crop={item.crop ?? null}
           alt="Image"
           imgClassName="w-full h-full object-contain pointer-events-none select-none"
         />
@@ -440,6 +443,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
         <AnnotatedImagePreview
           imageUrl={imageUrl}
           lines={field?.lines}
+          crop={field?.crop ?? null}
           alt="NPC portrait"
           imgClassName={img.imgClassName}
           objectFit={img.objectFit}
@@ -459,6 +463,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
         <AnnotatedImagePreview
           imageUrl={imageUrl}
           lines={field?.lines}
+          crop={field?.crop ?? null}
           alt={fieldLabel}
           imgClassName={img.imgClassName}
           objectFit={img.objectFit}
@@ -601,6 +606,7 @@ function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[]
       imageUrl: item.content,
       alt: item.title || 'Image',
       objectClassName: 'object-contain object-center',
+      crop: item.crop,
     };
   }
 
@@ -619,6 +625,7 @@ function getPrimaryImagePreview(item: BoardItemType, resolvedFields: ItemField[]
     imageUrl: imageField.imageUrl,
     alt: imageField.label || item.title || 'Image',
     objectClassName: shouldContain ? 'object-contain object-center' : 'object-cover object-top',
+    crop: imageField.crop,
   };
 }
 
@@ -1152,12 +1159,18 @@ export default memo(function BoardItem({
           onDoubleClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
           title={`${item.title || 'Untitled'} (${item.type})`}
         >
-          <img
-            src={primaryImage.imageUrl}
-            alt={primaryImage.alt}
-            draggable={false}
-            className={`w-full h-full ${primaryImage.objectClassName} pointer-events-none select-none`}
-          />
+          {(() => {
+            const masked = !!primaryImage.crop && !isFullCrop(primaryImage.crop);
+            return (
+              <img
+                src={primaryImage.imageUrl}
+                alt={primaryImage.alt}
+                draggable={false}
+                style={masked ? { ...cropMaskStyle(primaryImage.crop!), objectFit: 'cover' } : undefined}
+                className={masked ? 'pointer-events-none select-none' : `w-full h-full ${primaryImage.objectClassName} pointer-events-none select-none`}
+              />
+            );
+          })()}
           <div
             className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-gradient-to-t from-black/75 via-black/45 to-transparent text-white"
             style={{

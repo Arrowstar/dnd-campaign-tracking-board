@@ -30,12 +30,22 @@ export type AttachedFile = {
   mimeType?: string;
 };
 
+/** Normalized crop rectangle (0..1) relative to an image's native space. */
+export type CropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type ItemField = {
   id: string;
   label: string;
   type: FieldType;
   textValue?: string;
   imageUrl?: string;
+  /** Mask-only crop: keeps the original imageUrl and stores the kept rectangle. */
+  crop?: CropRect;
   lines?: DrawingLine[];
   files?: AttachedFile[];
   /** Per-field visibility. Undefined/'all' = everyone on the board can see it.
@@ -81,6 +91,8 @@ export type BoardItem = {
   comments: Comment[];
   // Specific fields for drawing over image
   lines?: DrawingLine[];
+  /** Mask-only crop for `type: 'image'` items whose image lives in `content`. */
+  crop?: CropRect;
   // Custom structured fields for specific item types (e.g., NPC)
   fields?: ItemField[];
   // Whether the item is minimized (collapsed to header only, no preview fields shown)

@@ -1,19 +1,20 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { DrawingLine } from '@/lib/types';
-import { getImageRenderRect } from '@/lib/utils';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { DrawingLine, CropRect } from '@/lib/types';
+import { getImageRenderRect, cropMaskStyle, isFullCrop, transformLinesForCrop, pointFromCropSpace } from '@/lib/utils';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 interface ImageDrawerProps {
   imageUrl: string;
   lines: DrawingLine[];
+  crop?: CropRect | null;
   onLinesChange: (lines: DrawingLine[]) => void;
   canEdit: boolean;
 }
 
-export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }: ImageDrawerProps) {
+export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canEdit }: ImageDrawerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -108,6 +109,22 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     'contain',
   );
 
+  // While a mask is active the kept rectangle fills the whole container, so the
+  // coordinate space we draw in is crop-space over the full canvas.
+  const isMasked = !!crop && !isFullCrop(crop);
+  const drawRect = useMemo(
+    () =>
+      isMasked
+        ? {
+            x: 0,
+            y: 0,
+            width: containerSize.width || imageRect.width,
+            height: containerSize.height || imageRect.height,
+          }
+        : imageRect,
+    [isMasked, containerSize.width, containerSize.height, imageRect],
+  );
+
   // Draw all lines whenever lines change, current line updates, or canvas resizes
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -121,8 +138,8 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const renderW = imageRect.width || canvas.width;
-    const renderH = imageRect.height || canvas.height;
+    const renderW = drawRect.width || canvas.width;
+    const renderH = drawRect.height || canvas.height;
 
     const drawLine = (l: DrawingLine) => {
       if (l.points.length < 2) return;
@@ -143,8 +160,8 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
       // Eraser uses destination-out to erase
       ctx.globalCompositeOperation = l.tool === 'eraser' ? 'destination-out' : 'source-over';
       
-      const getX = (val: number) => isLineNormalized ? imageRect.x + val * renderW : val;
-      const getY = (val: number) => isLineNormalized ? imageRect.y + val * renderH : val;
+      const getX = (val: number) => isLineNormalized ? drawRect.x + val * renderW : val;
+      const getY = (val: number) => isLineNormalized ? drawRect.y + val * renderH : val;
 
       ctx.moveTo(getX(l.points[0]), getY(l.points[1]));
       if (l.points.length === 2) {
@@ -157,22 +174,39 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
       ctx.stroke();
     };
     
-    lines.forEach(drawLine);
-    if (currentLine) drawLine(currentLine);
-  }, [lines, currentLine, canvasSize, containerSize, naturalSize, imageRect]);
+    // Lines are stored in ORIGINAL image space; remap them into crop space so
+    // they line up with the masked display.
+    const displayLines = isMasked ? transformLinesForCrop(lines, crop!) ?? [] : lines;
+    displayLines.forEach(drawLine);
+    if (currentLine) {
+      const displayCurrent = isMasked ? (transformLinesForCrop([currentLine], crop!) ?? [])[0] : currentLine;
+      if (displayCurrent) drawLine(displayCurrent);
+    }
+  }, [lines, crop, currentLine, canvasSize, containerSize, naturalSize, imageRect, isMasked, drawRect]);
 
   const getPointerPos = (e: React.PointerEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const cRect = canvas.getBoundingClientRect();
-    // Return relative coordinates normalized to the visible image rect (0..1),
-    // not the whole container, so stored lines stay aligned with the image.
+    // Return relative coordinates normalized to the drawing rect (the visible
+    // image or the crop window), not the whole container, so stored lines stay
+    // aligned with what the user sees.
     const px = e.clientX - cRect.left;
     const py = e.clientY - cRect.top;
     return {
-      x: imageRect.width > 0 ? (px - imageRect.x) / imageRect.width : 0,
-      y: imageRect.height > 0 ? (py - imageRect.y) / imageRect.height : 0
+      x: drawRect.width > 0 ? (px - drawRect.x) / drawRect.width : 0,
+      y: drawRect.height > 0 ? (py - drawRect.y) / drawRect.height : 0,
     };
+  };
+
+  // Convert a pointer position from display space into the ORIGINAL image space
+  // used for storage (unmasked == identity, masked == crop-space → original).
+  const toStoredPoint = (pos: { x: number; y: number }) => {
+    if (isMasked && crop) {
+      const o = pointFromCropSpace(pos.x, pos.y, crop);
+      return { x: clamp01(o.x), y: clamp01(o.y) };
+    }
+    return { x: clamp01(pos.x), y: clamp01(pos.y) };
   };
 
   const startDrawing = (e: React.PointerEvent) => {
@@ -182,11 +216,12 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     const pos = getPointerPos(e);
     // Ignore strokes that start outside the visible image (letterbox area)
     if (pos.x < 0 || pos.x > 1 || pos.y < 0 || pos.y > 1) return;
+    const p = toStoredPoint(pos);
     setIsDrawing(true);
     setCurrentLine({
       tool,
       color,
-      points: [clamp01(pos.x), clamp01(pos.y)]
+      points: [p.x, p.y]
     });
   };
 
@@ -194,10 +229,10 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
     if (!isDrawing || !currentLine) return;
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
-    const pos = getPointerPos(e);
+    const p = toStoredPoint(getPointerPos(e));
     setCurrentLine({
       ...currentLine,
-      points: [...currentLine.points, clamp01(pos.x), clamp01(pos.y)]
+      points: [...currentLine.points, p.x, p.y]
     });
   };
 
@@ -249,6 +284,7 @@ export default function ImageDrawer({ imageUrl, lines, onLinesChange, canEdit }:
           src={imageUrl} 
           alt="Map/Image" 
           onLoad={handleImageLoad}
+          style={isMasked && crop ? { ...cropMaskStyle(crop), objectFit: 'contain' } : undefined}
           className="w-full h-full rounded pointer-events-none select-none object-contain" 
           referrerPolicy="no-referrer"
           draggable={false}
