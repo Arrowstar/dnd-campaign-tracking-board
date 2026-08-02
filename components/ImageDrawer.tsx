@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { DrawingLine, CropRect } from '@/lib/types';
 import { getImageRenderRect, getCroppedImageGeometry, isFullCrop, transformLinesForCrop, pointFromCropSpace } from '@/lib/utils';
 
@@ -28,6 +28,8 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [maskedContainerSize, setMaskedContainerSize] = useState({ width: 0, height: 0 });
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+
+  const isMasked = !!crop && !isFullCrop(crop);
 
   // Track the container size dynamically using a ResizeObserver
   useEffect(() => {
@@ -60,6 +62,28 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Make sure the container/wrap sizes are known the instant the mask becomes
+  // active. The ResizeObservers deliver asynchronously, so without this the
+  // first masked render can fall back to zero-size geometry — the image toggles
+  // between the unmasked and masked layout (flash) and the drawing rect
+  // collapses to the canvas origin (strokes bunch up in the top-left corner).
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (container) {
+      const r = container.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setContainerSize({ width: r.width, height: r.height });
+      }
+    }
+    const wrap = imageWrapRef.current;
+    if (wrap) {
+      const r = wrap.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setMaskedContainerSize({ width: r.width, height: r.height });
+      }
+    }
+  }, [isMasked, crop]);
 
   const syncCanvasSize = () => {
     const canvas = canvasRef.current;
@@ -130,7 +154,6 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
 
   // Masked mode: compute the exact geometry of the crop region inside the
   // image wrap. Crop-space coordinates map onto `geometry.rect`.
-  const isMasked = !!crop && !isFullCrop(crop);
   const geometry = useMemo(
     () =>
       isMasked
@@ -211,18 +234,25 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     }
   }, [lines, crop, currentLine, canvasSize, containerSize, naturalSize, isMasked, drawRect]);
 
-  const getPointerPos = (e: React.PointerEvent) => {
+  const getPointerPos = (e: React.PointerEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return null;
     const cRect = canvas.getBoundingClientRect();
+    if (cRect.width <= 0 || cRect.height <= 0) return null;
+    // While a mask is active the drawing space is the crop region. If the
+    // mask geometry isn't ready yet, the mapping is undefined — refuse the
+    // stroke instead of collapsing it onto the canvas origin.
+    if (isMasked && !geometry) return null;
+    const d = drawRect;
+    if (!d || d.width <= 0 || d.height <= 0) return null;
     // Return relative coordinates normalized to the drawing rect (the visible
     // image or the crop window), not the whole container, so stored lines stay
     // aligned with what the user sees.
     const px = e.clientX - cRect.left;
     const py = e.clientY - cRect.top;
     return {
-      x: drawRect.width > 0 ? (px - drawRect.x) / drawRect.width : 0,
-      y: drawRect.height > 0 ? (py - drawRect.y) / drawRect.height : 0,
+      x: (px - d.x) / d.width,
+      y: (py - d.y) / d.height,
     };
   };
 
@@ -241,6 +271,7 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
     const pos = getPointerPos(e);
+    if (!pos) return;
     // Ignore strokes that start outside the visible image (letterbox area)
     if (pos.x < 0 || pos.x > 1 || pos.y < 0 || pos.y > 1) return;
     const p = toStoredPoint(pos);
@@ -256,7 +287,9 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     if (!isDrawing || !currentLine) return;
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
-    const p = toStoredPoint(getPointerPos(e));
+    const pos = getPointerPos(e);
+    if (!pos) return;
+    const p = toStoredPoint(pos);
     setCurrentLine({
       ...currentLine,
       points: [...currentLine.points, p.x, p.y]
