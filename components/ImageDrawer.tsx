@@ -89,10 +89,15 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     const canvas = canvasRef.current;
     if (!canvas) return;
     // The canvas overlays the image wrap (inset-0), so its buffer should match
-    // the wrap's CSS size. (The masked image element itself is blown up, so it
-    // must not drive the canvas size.)
-    const w = canvas.clientWidth || canvas.width;
-    const h = canvas.clientHeight || canvas.height;
+    // the wrap's CSS size. Measure the WRAP, not the canvas: a canvas's CSS
+    // size is driven by its width/height attributes once they've been set, so
+    // reading canvas.clientWidth is self-referential — a sync that runs before
+    // the layout settles locks the canvas to a stale size and it can never
+    // recover, squishing every stroke into the top-left corner. (The masked
+    // image element itself is blown up, so it must not drive the canvas size.)
+    const wrap = imageWrapRef.current;
+    const w = wrap ? wrap.clientWidth : 0;
+    const h = wrap ? wrap.clientHeight : 0;
     if (w > 0 && h > 0) {
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
@@ -108,10 +113,13 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
       syncCanvasSize();
     }
     
-    // Also add a resize observer to the image to handle window resizes changing the image size
-    if (img) {
+    // Re-sync the canvas whenever the image wrap resizes (image load, window
+    // or drawer resizes, mask layout changes). The wrap is what the canvas
+    // overlays, so it's the correct reference for the buffer size.
+    const wrap = imageWrapRef.current;
+    if (wrap) {
       const ro = new ResizeObserver(syncCanvasSize);
-      ro.observe(img);
+      ro.observe(wrap);
       return () => ro.disconnect();
     }
   }, [imageUrl]);
@@ -362,7 +370,7 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
         />
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 cursor-crosshair touch-none no-pan"
+          className="absolute inset-0 w-full h-full cursor-crosshair touch-none no-pan"
           onPointerDown={startDrawing}
           onPointerMove={draw}
           onPointerUp={stopDrawing}
