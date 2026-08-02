@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { DrawingLine, CropRect } from '@/lib/types';
-import { getImageRenderRect, cropMaskStyle, isFullCrop, transformLinesForCrop } from '@/lib/utils';
+import { getImageRenderRect, getCroppedImageGeometry, isFullCrop, transformLinesForCrop } from '@/lib/utils';
 
 interface AnnotatedImagePreviewProps {
   imageUrl: string;
@@ -31,6 +31,21 @@ export default function AnnotatedImagePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  // Track the container size so the masked image geometry can be computed at
+  // render time (the image itself is absolutely positioned in mask mode).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const drawLines = useCallback(() => {
     const canvas = canvasRef.current;
@@ -53,11 +68,16 @@ export default function AnnotatedImagePreview({
 
     // Lines are stored normalized to the ORIGINAL image. When a mask is
     // active, remap them into the crop's coordinate space for display (points
-    // outside the mask are dropped). The mask fills the whole container, so the
-    // crop-space lines map across the full canvas.
+    // outside the mask are dropped). Crop-space lines map across the realized
+    // rect of the crop region within the container.
     const isMasked = !!crop && !isFullCrop(crop);
     const rect = isMasked
-      ? { x: 0, y: 0, width: w, height: h }
+      ? (getCroppedImageGeometry(w, h, naturalSize.width, naturalSize.height, crop!, objectFit, objectPosition)?.rect ?? {
+          x: 0,
+          y: 0,
+          width: w,
+          height: h,
+        })
       : getImageRenderRect(w, h, naturalSize.width, naturalSize.height, objectFit, objectPosition);
     const renderW = rect.width || w;
     const renderH = rect.height || h;
@@ -109,15 +129,34 @@ export default function AnnotatedImagePreview({
   }, [drawLines, imageUrl, lines]);
 
   const isMasked = !!crop && !isFullCrop(crop);
+  const geometry = isMasked
+    ? getCroppedImageGeometry(
+        containerSize.width,
+        containerSize.height,
+        naturalSize.width,
+        naturalSize.height,
+        crop!,
+        objectFit,
+        objectPosition,
+      )
+    : null;
 
   return (
-    <div ref={containerRef} className={className}>
+    <div
+      ref={containerRef}
+      className={className}
+      // In mask mode the image is out of flow, so give the container the crop
+      // region's aspect ratio — this preserves the height that the image used
+      // to provide (grid rows / auto-height parents keep their size). When a
+      // parent constrains the height, the explicit height wins over this.
+      style={geometry ? { aspectRatio: `${geometry.regionAspect} / 1` } : undefined}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}
         src={imageUrl}
         alt={alt}
-        style={isMasked ? { ...cropMaskStyle(crop!), objectFit: 'contain' } : undefined}
+        style={geometry?.imgStyle}
         onLoad={() => {
           const img = imgRef.current;
           if (img) {
@@ -125,7 +164,7 @@ export default function AnnotatedImagePreview({
           }
           drawLines();
         }}
-        className={imgClassName}
+        className={geometry ? 'pointer-events-none select-none' : imgClassName}
         draggable={false}
       />
       {lines && lines.length > 0 && (

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { DrawingLine, CropRect } from '@/lib/types';
-import { getImageRenderRect, cropMaskStyle, isFullCrop, transformLinesForCrop, pointFromCropSpace } from '@/lib/utils';
+import { getImageRenderRect, getCroppedImageGeometry, isFullCrop, transformLinesForCrop, pointFromCropSpace } from '@/lib/utils';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -17,6 +17,7 @@ interface ImageDrawerProps {
 export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canEdit }: ImageDrawerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageWrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -25,6 +26,7 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
   const [color, setColor] = useState('#ef4444');
 
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [maskedContainerSize, setMaskedContainerSize] = useState({ width: 0, height: 0 });
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
 
   // Track the container size dynamically using a ResizeObserver
@@ -44,17 +46,34 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     return () => ro.disconnect();
   }, []);
 
+  // In mask mode the image is absolutely positioned, so track the image wrap's
+  // own size for the geometry instead (it differs from the outer container by
+  // the toolbar height).
+  useEffect(() => {
+    const el = imageWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setMaskedContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const syncCanvasSize = () => {
-    const img = imgRef.current;
-    if (canvasRef.current && img) {
-      const w = img.clientWidth || img.width;
-      const h = img.clientHeight || img.height;
-      if (w > 0 && h > 0) {
-        if (canvasRef.current.width !== w || canvasRef.current.height !== h) {
-          canvasRef.current.width = w;
-          canvasRef.current.height = h;
-          setCanvasSize({ width: w, height: h });
-        }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // The canvas overlays the image wrap (inset-0), so its buffer should match
+    // the wrap's CSS size. (The masked image element itself is blown up, so it
+    // must not drive the canvas size.)
+    const w = canvas.clientWidth || canvas.width;
+    const h = canvas.clientHeight || canvas.height;
+    if (w > 0 && h > 0) {
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        setCanvasSize({ width: w, height: h });
       }
     }
   };
@@ -109,20 +128,28 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
     'contain',
   );
 
-  // While a mask is active the kept rectangle fills the whole container, so the
-  // coordinate space we draw in is crop-space over the full canvas.
+  // Masked mode: compute the exact geometry of the crop region inside the
+  // image wrap. Crop-space coordinates map onto `geometry.rect`.
   const isMasked = !!crop && !isFullCrop(crop);
-  const drawRect = useMemo(
+  const geometry = useMemo(
     () =>
       isMasked
-        ? {
-            x: 0,
-            y: 0,
-            width: containerSize.width || imageRect.width,
-            height: containerSize.height || imageRect.height,
-          }
-        : imageRect,
-    [isMasked, containerSize.width, containerSize.height, imageRect],
+        ? getCroppedImageGeometry(
+            maskedContainerSize.width,
+            maskedContainerSize.height,
+            naturalSize.width,
+            naturalSize.height,
+            crop!,
+            'contain',
+            'center',
+          )
+        : null,
+    [isMasked, crop, maskedContainerSize.width, maskedContainerSize.height, naturalSize.width, naturalSize.height],
+  );
+
+  const drawRect = useMemo(
+    () => (geometry?.rect ? geometry.rect : imageRect),
+    [geometry, imageRect],
   );
 
   // Draw all lines whenever lines change, current line updates, or canvas resizes
@@ -182,7 +209,7 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
       const displayCurrent = isMasked ? (transformLinesForCrop([currentLine], crop!) ?? [])[0] : currentLine;
       if (displayCurrent) drawLine(displayCurrent);
     }
-  }, [lines, crop, currentLine, canvasSize, containerSize, naturalSize, imageRect, isMasked, drawRect]);
+  }, [lines, crop, currentLine, canvasSize, containerSize, naturalSize, isMasked, drawRect]);
 
   const getPointerPos = (e: React.PointerEvent) => {
     const canvas = canvasRef.current;
@@ -277,15 +304,15 @@ export default function ImageDrawer({ imageUrl, lines, crop, onLinesChange, canE
         </div>
       )}
       
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0" ref={imageWrapRef}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img 
           ref={imgRef}
           src={imageUrl} 
           alt="Map/Image" 
           onLoad={handleImageLoad}
-          style={isMasked && crop ? { ...cropMaskStyle(crop), objectFit: 'contain' } : undefined}
-          className="w-full h-full rounded pointer-events-none select-none object-contain" 
+          style={geometry?.imgStyle}
+          className={geometry ? 'pointer-events-none select-none' : 'w-full h-full rounded pointer-events-none select-none object-contain'} 
           referrerPolicy="no-referrer"
           draggable={false}
         />

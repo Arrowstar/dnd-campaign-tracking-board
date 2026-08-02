@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, MapPin, Users, CalendarDays, FileText,
   BookOpen, Package, Clock, Crown, ScrollText, File,
 } from 'lucide-react';
-import { uploadFileToBlob, cropMaskStyle, isFullCrop } from '@/lib/utils';
+import { uploadFileToBlob, isFullCrop } from '@/lib/utils';
 import type { CropRect } from '@/lib/types';
 import UploadProgress from './UploadProgress';
 
@@ -1160,14 +1160,22 @@ export default memo(function BoardItem({
           title={`${item.title || 'Untitled'} (${item.type})`}
         >
           {(() => {
-            const masked = !!primaryImage.crop && !isFullCrop(primaryImage.crop);
+            const crop = primaryImage.crop;
+            const masked = !!crop && !isFullCrop(crop);
             return (
               <img
                 src={primaryImage.imageUrl}
                 alt={primaryImage.alt}
                 draggable={false}
-                style={masked ? { ...cropMaskStyle(primaryImage.crop!), objectFit: 'cover' } : undefined}
-                className={masked ? 'pointer-events-none select-none' : `w-full h-full ${primaryImage.objectClassName} pointer-events-none select-none`}
+                className={`w-full h-full pointer-events-none select-none ${masked ? '' : primaryImage.objectClassName}`}
+                style={
+                  masked
+                    ? {
+                        objectFit: 'cover',
+                        objectPosition: `${(crop.x + crop.width / 2) * 100}% ${(crop.y + crop.height / 2) * 100}%`,
+                      }
+                    : undefined
+                }
               />
             );
           })()}

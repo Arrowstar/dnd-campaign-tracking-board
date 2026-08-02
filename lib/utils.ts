@@ -53,24 +53,70 @@ export function getImageRenderRect(
   };
 }
 
+export interface CroppedImageGeometry {
+  /** CSS for the absolutely positioned <img> (its box keeps the image's aspect). */
+  imgStyle: CSSProperties;
+  /** Realized rectangle (in container CSS px) where the crop region is displayed. */
+  rect: ImageRenderRect;
+  /** Aspect ratio (w / h) of the crop region. */
+  regionAspect: number;
+}
+
 /**
- * CSS to show the kept rectangle of an image instead of a separate cropped
- * blob: the image element is blown up so the crop region fills the parent and
- * shifted so the crop's origin sits at the top-left. Use inside an
- * `overflow-hidden` wrapper. (`width`/`height`/`transform` percentages are
- * relative to the image element's own box.)
+ * Compute exact display geometry for a mask-only crop.
+ *
+ * The crop region is treated as if it were its own image (aspect
+ * `regionAspect`) and fit into the container with the given `fit` semantics —
+ * exactly what a real cropped blob displayed with `object-fit` would do. The
+ * returned `imgStyle` positions the ORIGINAL image so that only the kept
+ * rectangle is visible, clipped with `clip-path` to the realized rect
+ * (letterbox margins around the region stay blank). No distortion: the image
+ * element's box always has the image's own aspect ratio.
  */
-export function cropMaskStyle(crop: CropRect): CSSProperties {
+export function getCroppedImageGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  naturalWidth: number,
+  naturalHeight: number,
+  crop: CropRect,
+  fit: 'contain' | 'cover' = 'contain',
+  alignY: 'center' | 'top' = 'center',
+): CroppedImageGeometry | null {
+  if (
+    containerWidth <= 0 ||
+    containerHeight <= 0 ||
+    naturalWidth <= 0 ||
+    naturalHeight <= 0 ||
+    crop.width <= 0 ||
+    crop.height <= 0
+  ) {
+    return null;
+  }
+
+  const regionWidth = naturalWidth * crop.width;
+  const regionHeight = naturalHeight * crop.height;
+  const rect = getImageRenderRect(containerWidth, containerHeight, regionWidth, regionHeight, fit, alignY);
+  const scale = rect.width / regionWidth;
+  const imgWidth = naturalWidth * scale;
+  const imgHeight = naturalHeight * scale;
+  const left = rect.x - crop.x * imgWidth;
+  const top = rect.y - crop.y * imgHeight;
+
   return {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: `calc(100% / ${crop.width})`,
-    height: `calc(100% / ${crop.height})`,
-    maxWidth: 'none',
-    maxHeight: 'none',
-    transformOrigin: '0 0',
-    transform: `translate(${-(crop.x ?? 0) * 100}%, ${-(crop.y ?? 0) * 100}%)`,
+    imgStyle: {
+      position: 'absolute',
+      top,
+      left,
+      width: imgWidth,
+      height: imgHeight,
+      maxWidth: 'none',
+      maxHeight: 'none',
+      clipPath: `inset(${Math.max(0, rect.y - top)}px ${Math.max(0, left + imgWidth - (rect.x + rect.width))}px ${
+        Math.max(0, top + imgHeight - (rect.y + rect.height))
+      }px ${Math.max(0, rect.x - left)}px)`,
+    },
+    rect,
+    regionAspect: regionWidth / regionHeight,
   };
 }
 
