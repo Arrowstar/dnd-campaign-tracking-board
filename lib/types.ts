@@ -69,6 +69,8 @@ export type PreviewFieldSlot = {
 export type PreviewLayout = {
   /** Number of columns in the card preview grid. */
   columns: 1 | 2 | 3 | 4;
+  /** Relative width per column (fractions summing to 1). Undefined = equal widths. */
+  columnWidths?: number[];
   /** Ordered list of preview slots. */
   rows: PreviewFieldSlot[];
 };

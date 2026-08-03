@@ -23,6 +23,7 @@ import {
   resolveFieldMode,
   resolveFieldSpan,
   resolveClampLines,
+  getColumnWidths,
 } from './previewLayout';
 import { getPlainText } from '@/lib/crossref';
 import AnnotatedImagePreview from './AnnotatedImagePreview';
@@ -791,6 +792,7 @@ export default memo(function BoardItem({
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
+  const columnWidths = getColumnWidths(previewLayout);
 
   // 'fill' images expand to cover the whole card body — the preview grid must
   // stretch its rows to fill the available height for that to work.
@@ -1320,7 +1322,7 @@ export default memo(function BoardItem({
         <div
           className="grid content-start gap-1.5 p-2 flex-1 overflow-hidden cursor-pointer group relative min-h-0"
           style={{
-            gridTemplateColumns: `repeat(${previewLayout.columns}, minmax(0, 1fr))`,
+            gridTemplateColumns: columnWidths.map(w => `minmax(0, ${w}fr)`).join(' '),
             gridAutoRows: hasFillPreview ? 'minmax(auto, 1fr)' : undefined,
           }}
           onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}

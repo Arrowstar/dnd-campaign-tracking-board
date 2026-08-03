@@ -21,6 +21,9 @@ import {
   classifyPreviewField,
   resolveFieldMode,
   resolveFieldSpan,
+  getColumnWidths,
+  moveColumnBoundary,
+  MIN_COLUMN_FRACTION,
 } from './previewLayout';
 import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
@@ -591,7 +594,7 @@ export default function FocusDrawer({
               )}
 
               <div className="pt-3 border-t border-[#D9D0C1] text-[10px] text-[#8C7B6E]">
-                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields, or drag the blocks in the mini preview directly. Open the sliders on a field to switch between partial/full width, hero banners vs thumbnails, and line clamps for long text.
+                <span className="font-bold text-[#B58D3D]">Tip:</span> Use the arrows to reorder fields, or drag the blocks in the mini preview directly. Drag the gold lines between columns to resize their relative widths. Open the sliders on a field to switch between partial/full width, hero banners vs thumbnails, and line clamps for long text.
               </div>
             </div>
           )}
@@ -858,6 +861,12 @@ function hasPreviewContent(item: BoardItemType, slot: PreviewFieldSlot, fieldTyp
   return !!field.textValue && field.textValue.replace(/<[^>]*>/g, '').trim().length > 0;
 }
 
+/** Fixed geometry of the mini card preview — the boundary-drag math depends on
+ *  these matching the Tailwind classes on the grid (w-[230px], p-1.5, gap-1). */
+const MINI_PREVIEW_WIDTH = 230;
+const MINI_PREVIEW_PAD = 6;
+const MINI_PREVIEW_GAP = 4;
+
 function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   layout: PreviewLayout;
   item: BoardItemType;
@@ -866,7 +875,9 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   onUpdate: (item: BoardItemType) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ from: number; target: number; active: boolean } | null>(null);
+  const [dragBoundary, setDragBoundary] = useState<number | null>(null);
 
   // Drag reorder: pointer drag on a block; dropping on another block swaps their rows.
   const handleRowPointerDown = (e: React.PointerEvent, from: number) => {
@@ -935,13 +946,55 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
     window.addEventListener('pointercancel', onUp);
   };
 
+  // Drag a column boundary: resizes the two adjacent columns in real time.
+  const handleBoundaryPointerDown = (boundary: number, e: React.PointerEvent) => {
+    if (!canEdit) return;
+    e.stopPropagation();
+    const gridEl = gridRef.current;
+    if (!gridEl) return;
+    const rect = gridEl.getBoundingClientRect();
+    const contentW = rect.width - 2 * MINI_PREVIEW_PAD;
+    setDragBoundary(boundary);
+
+    const onMove = (mv: PointerEvent) => {
+      const fraction = (mv.clientX - rect.left - MINI_PREVIEW_PAD) / contentW;
+      onUpdate({ ...item, previewLayout: moveColumnBoundary(layout, boundary, fraction) });
+    };
+
+    const onUp = () => {
+      setDragBoundary(null);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
+  const widths = getColumnWidths(layout);
+  const contentW = MINI_PREVIEW_WIDTH - 2 * MINI_PREVIEW_PAD;
+  // Boundary `b` (between 0-based columns b-1 and b) sits after the first
+  // b columns plus b grid gaps (p-1.5 = 6px padding, gap-1 = 4px gap).
+  const boundaryPx: number[] = [];
+  let cum = 0;
+  for (let i = 0; i < widths.length - 1; i++) {
+    cum += widths[i];
+    boundaryPx.push(MINI_PREVIEW_PAD + cum * contentW + (i + 1) * MINI_PREVIEW_GAP);
+  }
+
   return (
-    <div ref={containerRef} className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: 230 }}>
+    <div ref={containerRef} className="rounded-lg border border-[#D9D0C1] bg-white shadow-sm overflow-hidden flex-shrink-0" style={{ width: MINI_PREVIEW_WIDTH }}>
       <div className="flex items-center gap-1 bg-[#2C2824] px-2 py-1">
         <span className="text-[8px] font-bold font-serif italic text-white truncate flex-1 min-w-0">{item.title || 'Untitled'}</span>
         <span className="text-[6px] font-bold uppercase tracking-wider text-white/90 bg-white/20 rounded px-1 py-px flex-shrink-0">{item.type}</span>
       </div>
-      <div className="grid content-start gap-1 p-1.5" style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }}>
+      <div
+        ref={gridRef}
+        className="grid content-start gap-1 p-1.5 relative"
+        style={{ gridTemplateColumns: widths.map(w => `minmax(0, ${w}fr)`).join(' ') }}
+      >
         {layout.rows.length === 0 ? (
           <div className="text-[8px] italic text-[#8C7B6E] text-center py-2 col-span-full">
             No preview fields — check some below
@@ -958,6 +1011,23 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
             drag={drag}
             onPointerDown={canEdit ? (e) => handleRowPointerDown(e, i) : undefined}
           />
+        ))}
+        {/* Column boundary drag handles */}
+        {canEdit && layout.columns > 1 && boundaryPx.map((left, i) => (
+          <div
+            key={`boundary-${i + 1}`}
+            data-boundary-handle
+            onPointerDown={(e) => handleBoundaryPointerDown(i + 1, e)}
+            title={`Drag to resize column widths (min ${Math.round(MIN_COLUMN_FRACTION * 100)}%)`}
+            className="absolute top-0 bottom-0 z-10 -translate-x-1/2 cursor-col-resize touch-none group"
+            style={{ left: `${left}px` }}
+          >
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(181,141,61,0.12)' }} />
+            <div
+              className="absolute top-0 bottom-0 w-[2px] -translate-x-1/2 rounded-full opacity-0 group-hover:opacity-100"
+              style={{ background: '#B58D3D', opacity: dragBoundary === i + 1 ? 1 : undefined }}
+            />
+          </div>
         ))}
       </div>
     </div>

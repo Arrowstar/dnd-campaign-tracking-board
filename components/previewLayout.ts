@@ -100,7 +100,90 @@ export function updatePreviewSlot(layout: PreviewLayout, fieldId: string, patch:
 }
 
 export function setPreviewColumns(layout: PreviewLayout, columns: PreviewLayout['columns']): PreviewLayout {
-  return { ...layout, columns };
+  if (columns === layout.columns) return layout;
+  return { ...layout, columns, columnWidths: rebalanceColumnWidths(layout, columns) };
+}
+
+/** Minimum relative width of any single column, to keep all columns usable. */
+export const MIN_COLUMN_FRACTION = 0.1;
+
+const WIDTH_EPSILON = 1e-3;
+
+/** Effective relative widths for a layout. Falls back to equal 1/N columns
+ *  when columnWidths is missing, malformed, or stale (wrong length/sum). */
+export function getColumnWidths(layout: Pick<PreviewLayout, 'columns' | 'columnWidths'>): number[] {
+  const n = layout.columns;
+  const widths = layout.columnWidths;
+  if (
+    n > 1 &&
+    Array.isArray(widths) &&
+    widths.length === n &&
+    widths.every(w => Number.isFinite(w) && w > 0) &&
+    Math.abs(widths.reduce((a, b) => a + b, 0) - 1) < WIDTH_EPSILON
+  ) {
+    return widths;
+  }
+  return Array.from({ length: n }, () => 1 / n);
+}
+
+/** Round a normalized width array so the values look clean and sum to exactly 1. */
+function normalizeWidths(widths: number[]): number[] {
+  const rounded = widths.slice(0, -1).map(w => Math.round(w * 1e6) / 1e6);
+  const last = 1 - rounded.reduce((a, b) => a + b, 0);
+  return [...rounded, Math.round(last * 1e6) / 1e6];
+}
+
+/** Move the boundary after column `boundary - 1` (0-based) — i.e. between
+ *  columns `boundary - 1` and `boundary` — to a new cumulative fraction.
+ *  Only those two adjacent columns change; every column stays at least
+ *  MIN_COLUMN_FRACTION wide and the widths still sum to 1. */
+export function moveColumnBoundary(layout: PreviewLayout, boundary: number, newPosition: number): PreviewLayout {
+  const n = layout.columns;
+  if (n < 2 || boundary < 1 || boundary >= n || !Number.isFinite(newPosition)) return layout;
+  const widths = [...getColumnWidths(layout)];
+  const prefix = widths.slice(0, boundary - 1).reduce((a, b) => a + b, 0);
+  const suffix = widths.slice(boundary + 1).reduce((a, b) => a + b, 0);
+  const min = prefix + MIN_COLUMN_FRACTION;
+  const max = 1 - suffix - MIN_COLUMN_FRACTION;
+  if (max <= min) return layout;
+  const position = Math.min(max, Math.max(min, newPosition));
+  widths[boundary - 1] = position - prefix;
+  widths[boundary] = 1 - suffix - position;
+  return { ...layout, columnWidths: normalizeWidths(widths) };
+}
+
+/** Map existing widths onto a new column count by interpolating the cumulative
+ *  boundary positions, so the proportions are preserved as closely as the
+ *  minimum-width floor allows. */
+function rebalanceColumnWidths(layout: Pick<PreviewLayout, 'columns' | 'columnWidths'>, newColumns: number): number[] | undefined {
+  if (newColumns < 2) return undefined;
+  const old = getColumnWidths(layout);
+  const cum: number[] = [];
+  let acc = 0;
+  for (const w of old) { acc += w; cum.push(acc); }
+  // Sample the old cumulative distribution at each new boundary position.
+  const boundaries: number[] = [];
+  for (let j = 1; j < newColumns; j++) {
+    const t = j / newColumns * acc;
+    let idx = 0;
+    while (idx < cum.length - 1 && cum[idx] < t) idx++;
+    const lower = idx === 0 ? 0 : cum[idx - 1];
+    const upper = cum[idx];
+    const span = upper - lower;
+    const fraction = span === 0 ? 0 : (t - lower) / span;
+    const value = lower + fraction * span;
+    boundaries.push(Math.min(1 - MIN_COLUMN_FRACTION * (newColumns - j), Math.max(MIN_COLUMN_FRACTION * j, value)));
+  }
+  // Enforce the minimum floor and renormalize so the widths still sum to 1.
+  let widths = Array.from({ length: newColumns }, (_, j) =>
+    j === 0 ? boundaries[0] : j === newColumns - 1 ? 1 - boundaries[j - 1] : boundaries[j] - boundaries[j - 1]
+  );
+  if (widths.some(w => w < MIN_COLUMN_FRACTION)) {
+    widths = widths.map(w => Math.max(MIN_COLUMN_FRACTION, w));
+    const total = widths.reduce((a, b) => a + b, 0);
+    widths = widths.map(w => w / total);
+  }
+  return normalizeWidths(widths);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
