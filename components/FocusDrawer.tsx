@@ -862,10 +862,10 @@ function hasPreviewContent(item: BoardItemType, slot: PreviewFieldSlot, fieldTyp
 }
 
 /** Fixed geometry of the mini card preview — the boundary-drag math depends on
- *  these matching the Tailwind classes on the grid (w-[230px], p-1.5, gap-1). */
+ *  these matching the Tailwind classes on the grid (w-[230px], p-1.5, gap-2). */
 const MINI_PREVIEW_WIDTH = 230;
 const MINI_PREVIEW_PAD = 6;
-const MINI_PREVIEW_GAP = 4;
+const MINI_PREVIEW_GAP = 8;
 
 function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   layout: PreviewLayout;
@@ -882,6 +882,8 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   // Drag reorder: pointer drag on a block; dropping on another block swaps their rows.
   const handleRowPointerDown = (e: React.PointerEvent, from: number) => {
     if (!canEdit) return;
+    // A press inside a column gap belongs to the column-resize gesture.
+    if ((e.target as HTMLElement).closest?.('[data-boundary-handle]')) return;
     e.stopPropagation();
     const startX = e.clientX;
     const startY = e.clientY;
@@ -953,11 +955,16 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
     const gridEl = gridRef.current;
     if (!gridEl) return;
     const rect = gridEl.getBoundingClientRect();
-    const contentW = rect.width - 2 * MINI_PREVIEW_PAD;
+    // Columns are fr tracks: they share the content width minus the gaps.
+    const frSpace = rect.width - 2 * MINI_PREVIEW_PAD - (layout.columns - 1) * MINI_PREVIEW_GAP;
     setDragBoundary(boundary);
 
     const onMove = (mv: PointerEvent) => {
-      const fraction = (mv.clientX - rect.left - MINI_PREVIEW_PAD) / contentW;
+      // Map the pointer to a cumulative fraction of the column track area,
+      // removing the fixed gaps before the dragged boundary and centering on
+      // the gap (the grab point), so the line tracks the cursor 1:1.
+      const px = mv.clientX - rect.left - MINI_PREVIEW_PAD - boundary * MINI_PREVIEW_GAP + MINI_PREVIEW_GAP / 2;
+      const fraction = px / frSpace;
       onUpdate({ ...item, previewLayout: moveColumnBoundary(layout, boundary, fraction) });
     };
 
@@ -974,14 +981,15 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
   };
 
   const widths = getColumnWidths(layout);
-  const contentW = MINI_PREVIEW_WIDTH - 2 * MINI_PREVIEW_PAD;
-  // Boundary `b` (between 0-based columns b-1 and b) sits after the first
-  // b columns plus b grid gaps (p-1.5 = 6px padding, gap-1 = 4px gap).
+  // fr tracks share the content width minus the gaps between columns, so a
+  // column i is `widths[i] * frSpace` wide — the boundary after it sits at
+  // PAD + cum * frSpace + (i+1) gaps (p-1.5 = 6px padding, gap-2 = 8px gap).
+  const frSpace = MINI_PREVIEW_WIDTH - 2 * MINI_PREVIEW_PAD - (widths.length - 1) * MINI_PREVIEW_GAP;
   const boundaryPx: number[] = [];
   let cum = 0;
   for (let i = 0; i < widths.length - 1; i++) {
     cum += widths[i];
-    boundaryPx.push(MINI_PREVIEW_PAD + cum * contentW + (i + 1) * MINI_PREVIEW_GAP);
+    boundaryPx.push(MINI_PREVIEW_PAD + cum * frSpace + (i + 1) * MINI_PREVIEW_GAP);
   }
 
   return (
@@ -992,7 +1000,7 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
       </div>
       <div
         ref={gridRef}
-        className="grid content-start gap-1 p-1.5 relative"
+        className="grid content-start gap-2 p-1.5 relative"
         style={{ gridTemplateColumns: widths.map(w => `minmax(0, ${w}fr)`).join(' ') }}
       >
         {layout.rows.length === 0 ? (
@@ -1012,19 +1020,24 @@ function CardPreviewMini({ layout, item, fieldDefs, canEdit, onUpdate }: {
             onPointerDown={canEdit ? (e) => handleRowPointerDown(e, i) : undefined}
           />
         ))}
-        {/* Column boundary drag handles */}
-        {canEdit && layout.columns > 1 && boundaryPx.map((left, i) => (
+        {/* Column boundary drag handles — one full-height zone per grid gap.
+            A press lands on either a block (reorder) or a gap (resize), never
+            both, so the two gestures can't interfere. */}
+        {canEdit && layout.columns > 1 && boundaryPx.map((right, i) => (
           <div
             key={`boundary-${i + 1}`}
             data-boundary-handle
             onPointerDown={(e) => handleBoundaryPointerDown(i + 1, e)}
             title={`Drag to resize column widths (min ${Math.round(MIN_COLUMN_FRACTION * 100)}%)`}
-            className="absolute top-0 bottom-0 z-10 -translate-x-1/2 cursor-col-resize touch-none group"
-            style={{ left: `${left}px` }}
+            className="absolute top-0 bottom-0 z-10 cursor-col-resize touch-none group"
+            style={{ left: right - MINI_PREVIEW_GAP, width: MINI_PREVIEW_GAP }}
           >
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(181,141,61,0.12)' }} />
             <div
-              className="absolute top-0 bottom-0 w-[2px] -translate-x-1/2 rounded-full opacity-0 group-hover:opacity-100"
+              className="absolute inset-0 transition-colors group-hover:bg-[#B58D3D]/15"
+              style={{ background: dragBoundary === i + 1 ? 'rgba(181,141,61,0.3)' : undefined }}
+            />
+            <div
+              className="absolute top-0 bottom-0 left-1/2 w-[2px] -translate-x-1/2 rounded-full opacity-40 group-hover:opacity-100 transition-opacity"
               style={{ background: '#B58D3D', opacity: dragBoundary === i + 1 ? 1 : undefined }}
             />
           </div>
