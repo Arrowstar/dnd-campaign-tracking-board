@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { BoardItem as BoardItemType, Connection, User, BoardTab, BoardAnnotation, AnnotationFontStyle } from '@/lib/types';
+import { BoardItem as BoardItemType, Connection, User, BoardTab, BoardAnnotation, AnnotationFontStyle, BoardSettings } from '@/lib/types';
 import BoardItem, { ITEM_FIELD_DEFS } from './BoardItem';
 import Toolbar, { ARROW_COLOR_PRESETS, ARROW_LINE_STYLES, ARROW_LINE_WIDTHS } from './Toolbar';
 import TabBar, { TAB_COLOR_PRESETS } from './TabBar';
@@ -20,6 +20,7 @@ import UploadProgress from './UploadProgress';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
+import BoardSettingsModal from './BoardSettingsModal';
 
 const BOARD_ITEM_LOD_THRESHOLDS = {
   fullWidth: 130,
@@ -67,6 +68,11 @@ export default function Board({ boardId }: { boardId: string }) {
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
+
+  // DM-managed board-wide settings (card text scale, and more in the future).
+  // Hydrated from the board state; changed by the DM via the Board Settings modal.
+  const [boardSettings, setBoardSettings] = useState<BoardSettings>({});
 
   // Persistence status — surfaced in the UI instead of silently swallowed
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -373,7 +379,7 @@ export default function Board({ boardId }: { boardId: string }) {
         }
         return res.json();
       })
-      .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; updatedAt?: string | null } | null) => {
+      .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; settings?: BoardSettings; updatedAt?: string | null } | null) => {
         if (!data) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser({
@@ -385,6 +391,10 @@ export default function Board({ boardId }: { boardId: string }) {
         });
         if (typeof data.updatedAt === 'string' && data.updatedAt) {
           appliedRevisionRef.current = data.updatedAt;
+        }
+        if (data.settings && typeof data.settings === 'object') {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setBoardSettings(data.settings);
         }
         let parsedTabs: BoardTab[] = [];
         if (data.tabs && Array.isArray(data.tabs) && data.tabs.length > 0) {
@@ -468,9 +478,12 @@ export default function Board({ boardId }: { boardId: string }) {
           return false;
         }
         if (!res.ok) return false;
-        const data = (await res.json()) as { tabs: BoardTab[] | undefined };
+        const data = (await res.json()) as { tabs: BoardTab[] | undefined; settings?: BoardSettings };
         if (cancelled || !data.tabs || !Array.isArray(data.tabs)) return false;
         const freshTabs: BoardTab[] = data.tabs;
+        if (data.settings && typeof data.settings === 'object') {
+          setBoardSettings(data.settings);
+        }
         setTabs(freshTabs);
         setActiveTabId(prev => {
           if (freshTabs.some(t => t.id === prev)) return prev;
@@ -1194,7 +1207,7 @@ export default function Board({ boardId }: { boardId: string }) {
       const isRedo = (e.ctrlKey || e.metaKey) && !e.altKey &&
         (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey));
       if (isUndo || isRedo) {
-        if (showMembersModal || showUserSettingsModal) return;
+        if (showMembersModal || showUserSettingsModal || showBoardSettingsModal) return;
         if (activeEl && (activeEl as HTMLElement).isContentEditable) return;
         e.preventDefault();
         if (isUndo) handleUndo(); else handleRedo();
@@ -1210,7 +1223,7 @@ export default function Board({ boardId }: { boardId: string }) {
       if (isFormField) return;
       // A focused button/link owns the Enter key — let it activate natively.
       if (e.key === 'Enter' && activeEl && (activeEl.tagName === 'BUTTON' || activeEl.tagName === 'A')) return;
-      if (showMembersModal || showUserSettingsModal) return;
+      if (showMembersModal || showUserSettingsModal || showBoardSettingsModal) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       switch (e.key) {
@@ -1384,6 +1397,7 @@ export default function Board({ boardId }: { boardId: string }) {
         setActiveAnnFontStyle={setActiveAnnFontStyle}
         onOpenMembersModal={() => setShowMembersModal(true)}
         onOpenSettingsModal={() => setShowUserSettingsModal(true)}
+        onOpenBoardSettings={() => setShowBoardSettingsModal(true)}
         onOpenShortcutsHelp={() => setShowShortcutsHelp(true)}
         canUndo={undoCount > 0}
         canRedo={redoCount > 0}
@@ -1945,6 +1959,7 @@ export default function Board({ boardId }: { boardId: string }) {
                         onScrollToItem={handleScrollToItem}
                         zoomScale={zoomScale / 100}
                         lodThresholds={BOARD_ITEM_LOD_THRESHOLDS}
+                        fontScale={boardSettings.cardFontScale ?? 1}
                         onOpenFocus={handleOpenFocus}
                       />
                     );
@@ -2029,6 +2044,16 @@ export default function Board({ boardId }: { boardId: string }) {
               isOpen={showShortcutsHelp}
               onClose={() => setShowShortcutsHelp(false)}
             />
+            {showBoardSettingsModal && (
+              <BoardSettingsModal
+                isOpen
+                onClose={() => setShowBoardSettingsModal(false)}
+                boardId={boardId}
+                sessionToken={user.sessionToken}
+                settings={boardSettings}
+                onPreviewChange={setBoardSettings}
+              />
+            )}
           </>
         )}
       </div>

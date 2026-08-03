@@ -345,6 +345,8 @@ interface BoardItemProps {
   zoomScale?: number;
   /** Per-item level-of-detail thresholds, expressed in rendered screen pixels. */
   lodThresholds?: BoardItemLodThresholds;
+  /** Board-wide card text scale multiplier (1 = default 100%), set by the DM. */
+  fontScale?: number;
   /** Called when user wants to open the focus drawer for this item */
   onOpenFocus?: (id: string) => void;
 }
@@ -392,7 +394,7 @@ function imagePreviewClasses(mode: Exclude<PreviewFieldMode, 'auto'>): {
   };
 }
 
-function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: {
+function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fontScale }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   user: User;
@@ -401,8 +403,11 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   resolvedFields: ItemField[];
   /** Number of columns in the preview grid (from the item's preview layout) */
   columns: PreviewLayout['columns'];
+  /** Board-wide card text scale multiplier */
+  fontScale: number;
 }) {
   const { fieldId } = slot;
+  const fontScalePx = (px: number) => px * fontScale;
 
   // ── image-type board items store their content in item.content ──
   if (item.type === 'image' && fieldId === '__image_content__') {
@@ -423,7 +428,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   // ── Per-field visibility: hidden fields render as a lock chip ──
   const field = resolvedFields.find(f => f.id === fieldId);
   if (field?.visibility && field.visibility !== 'all' && !canViewField(field, item, user)) {
-    return <HiddenFieldChip label={field.label} visibility={field.visibility} />;
+    return <HiddenFieldChip label={field.label} visibility={field.visibility} fontScale={fontScale} />;
   }
 
   const fieldType = classifyPreviewField(fieldId, item.type, fieldDefs, resolvedFields);
@@ -493,7 +498,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
           className={`min-h-0 ${span === columns && entries.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
         >
           {entries.map(([k, v]) => (
-            <div key={k} className="flex items-baseline gap-1 text-[10px] leading-tight">
+            <div key={k} className="flex items-baseline gap-1 leading-tight" style={{ fontSize: fontScalePx(10) }}>
               <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={k}>{k}</span>
               <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(v)}</span>
             </div>
@@ -514,7 +519,7 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
         className={`min-h-0 ${span === columns && shown.length >= 2 ? 'grid grid-cols-2 gap-x-2 gap-y-0.5' : 'flex flex-col gap-0.5'}`}
       >
         {shown.map(e => (
-          <div key={e.label} className="flex items-baseline gap-1 text-[10px] leading-tight">
+          <div key={e.label} className="flex items-baseline gap-1 leading-tight" style={{ fontSize: fontScalePx(10) }}>
             <span className="font-bold uppercase text-[#8C7B6E] opacity-80 flex-shrink-0 truncate max-w-[65%]" title={e.label}>{e.label}</span>
             <span className="truncate opacity-90 flex-1 min-w-0">{getPlainText(e.value)}</span>
           </div>
@@ -533,14 +538,14 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
     const shown = mode === 'expanded' ? files : files.slice(0, 3);
     return (
       <div style={spanStyle} className="flex flex-col gap-0.5 min-h-0">
-        <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={fieldLabel}>
+        <span className="font-bold uppercase text-[#8C7B6E] opacity-80 tracking-wide truncate" style={{ fontSize: fontScalePx(9) }} title={fieldLabel}>
           {fieldLabel}
         </span>
         <div className="flex flex-col gap-0.5 min-h-0">
           {shown.map(file => (
             <div key={file.id} className="flex items-center gap-1 min-w-0">
-              <File size={9} className="text-[#B58D3D] flex-shrink-0" />
-              <span className="truncate text-[10px] leading-snug opacity-90 flex-1 min-w-0" title={file.name}>
+              <File size={fontScalePx(9)} className="text-[#B58D3D] flex-shrink-0" />
+              <span className="truncate leading-snug opacity-90 flex-1 min-w-0" style={{ fontSize: fontScalePx(10) }} title={file.name}>
                 {file.name}
               </span>
             </div>
@@ -563,17 +568,20 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   const clamp = resolveClampLines(slot, mode);
   return (
     <div style={spanStyle} className="flex flex-col gap-0.5 justify-between min-h-0">
-      <span className="font-bold uppercase text-[#8C7B6E] opacity-80 text-[9px] tracking-wide truncate" title={fieldLabel}>
+      <span className="font-bold uppercase text-[#8C7B6E] opacity-80 tracking-wide truncate" style={{ fontSize: fontScalePx(9) }} title={fieldLabel}>
         {fieldLabel}
       </span>
       <p
-        className="rich-text-preview text-[10px] leading-snug text-[#423D38]/80 min-h-0"
-        style={clamp ? {
-          display: '-webkit-box',
-          WebkitLineClamp: clamp,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        } : undefined}
+        className="rich-text-preview leading-snug text-[#423D38]/80 min-h-0"
+        style={{
+          fontSize: fontScalePx(10),
+          ...(clamp ? {
+            display: '-webkit-box',
+            WebkitLineClamp: clamp,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          } : undefined),
+        }}
       >
         <span dangerouslySetInnerHTML={{ __html: previewHtml }} />
       </p>
@@ -581,18 +589,20 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns }: 
   );
 }
 
-function HiddenFieldChip({ label, visibility }: { label: string; visibility: Visibility }) {
+function HiddenFieldChip({ label, visibility, fontScale }: { label: string; visibility: Visibility; fontScale: number }) {
   const isDm = visibility === 'dm';
+  const fs = (px: number) => px * fontScale;
   return (
-    <div className="flex items-center gap-1 text-[9px] leading-tight min-w-0">
-      <Lock size={9} className={`flex-shrink-0 ${isDm ? 'text-purple-500/80' : 'text-amber-500/80'}`} />
+    <div className="flex items-center gap-1 leading-tight min-w-0" style={{ fontSize: fs(9) }}>
+      <Lock size={fs(9)} className={`flex-shrink-0 ${isDm ? 'text-purple-500/80' : 'text-amber-500/80'}`} />
       <span className="font-bold uppercase text-[#8C7B6E] opacity-80 truncate" title={label}>
         {label}
       </span>
       <span
-        className={`font-bold uppercase flex-shrink-0 px-1 py-px rounded text-[8px] ${
+        className={`font-bold uppercase flex-shrink-0 px-1 py-px rounded ${
           isDm ? 'bg-purple-500/10 text-purple-700' : 'bg-amber-500/10 text-amber-700'
         }`}
+        style={{ fontSize: fs(8) }}
       >
         {isDm ? 'DM only' : 'Owner only'}
       </span>
@@ -737,6 +747,7 @@ export default memo(function BoardItem({
   onScrollToItem,
   zoomScale = 1,
   lodThresholds,
+  fontScale = 1,
   onOpenFocus,
 }: BoardItemProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -769,11 +780,14 @@ export default memo(function BoardItem({
 
   const safeZoomScale = Math.max(0.05, zoomScale || 1);
 
+  // Board-wide DM setting: scales every piece of card text by fontScale.
+  const fontScalePx = (px: number) => px * fontScale;
+
   // Zoom-scaled title font: larger when zoomed out so text stays legible
   // At 100% zoom → 13px. At 50% zoom → 16px (cap). At 200% → ~10px (floor).
   // Capped at 16 (was 20) so the title text can't grow large enough to
   // starve the rest of the header row (badge/controls) of space.
-  const titleFontSize = Math.min(16, Math.max(10, 13 / safeZoomScale));
+  const titleFontSize = Math.min(16, Math.max(10, 13 / safeZoomScale)) * fontScale;
 
   const fieldDefs = ITEM_FIELD_DEFS[item.type]?.defs ?? null;
   const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
@@ -1003,12 +1017,12 @@ export default memo(function BoardItem({
   const pinDiameter = thresholds.pinScreenSize / safeZoomScale;
   const pinIconSize = 18 / safeZoomScale;
   const pinLabelWidth = 150 / safeZoomScale;
-  const pinFontSize = 11 / safeZoomScale;
-  const pinLineHeight = 14 / safeZoomScale;
-  const compactCaptionFontSize = 11 / safeZoomScale;
+  const pinFontSize = (11 / safeZoomScale) * fontScale;
+  const pinLineHeight = (14 / safeZoomScale) * fontScale;
+  const compactCaptionFontSize = (11 / safeZoomScale) * fontScale;
   const compactCaptionPaddingY = 4 / safeZoomScale;
   const compactCaptionPaddingX = 6 / safeZoomScale;
-  const compactTypeFontSize = 8 / safeZoomScale;
+  const compactTypeFontSize = (8 / safeZoomScale) * fontScale;
   const lodShellHeight = renderFullCard && item.minimized
     ? undefined
     : renderPinCard && item.minimized
@@ -1247,8 +1261,11 @@ export default memo(function BoardItem({
 
         {/* Type badge */}
         <span
-          style={isLight ? { backgroundColor: 'rgba(0,0,0,0.1)', color: '#374151' } : { backgroundColor: itemColor, color: '#FFFFFF' }}
-          className="text-[9px] font-bold uppercase tracking-wider flex-shrink-0 px-1 py-0.5 rounded truncate max-w-[64px]"
+          style={{
+            ...(isLight ? { backgroundColor: 'rgba(0,0,0,0.1)', color: '#374151' } : { backgroundColor: itemColor, color: '#FFFFFF' }),
+            fontSize: fontScalePx(9),
+          }}
+          className="font-bold uppercase tracking-wider flex-shrink-0 px-1 py-0.5 rounded truncate max-w-[64px]"
           title={item.type}
         >
           {item.type}
@@ -1311,7 +1328,7 @@ export default memo(function BoardItem({
           onPointerDownCapture={e => e.stopPropagation()}
         >
           {previewLayout.rows.map(slot => (
-            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} />
+            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} fontScale={fontScale} />
           ))}
           {/* Subtle hover gradient */}
           <div className="absolute inset-0 rounded-[5px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
@@ -1360,11 +1377,12 @@ export default memo(function BoardItem({
 
       {/* ── Footer: owner + comments ── */}
       <div
+        className="px-2 py-1 flex justify-between items-center text-[#8C7B6E] rounded-b-[5px] gap-1 flex-shrink-0"
         style={{
+          fontSize: fontScalePx(9),
           backgroundColor: isLight ? 'rgba(0,0,0,0.06)' : '#F5F2ED',
           borderTop: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid #D9D0C1',
         }}
-        className="px-2 py-1 flex justify-between items-center text-[9px] text-[#8C7B6E] rounded-b-[5px] gap-1 flex-shrink-0"
       >
         <div className="flex items-center gap-1 min-w-0">
           <UserIcon size={9} className="text-[#8C7B6E] flex-shrink-0" />

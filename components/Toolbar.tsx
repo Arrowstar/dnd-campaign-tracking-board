@@ -71,6 +71,7 @@ interface ToolbarProps {
 
   onOpenMembersModal?: () => void;
   onOpenSettingsModal?: () => void;
+  onOpenBoardSettings?: () => void;
   onOpenShortcutsHelp?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
@@ -105,6 +106,7 @@ export default function Toolbar({
 
   onOpenMembersModal,
   onOpenSettingsModal,
+  onOpenBoardSettings,
   onOpenShortcutsHelp,
   canUndo,
   canRedo,
@@ -174,6 +176,18 @@ export default function Toolbar({
             >
               <KeyRound size={14} className="text-[#B58D3D]" />
               <span>Settings</span>
+            </button>
+          )}
+
+          {user.role === 'dm' && onOpenBoardSettings && (
+            <button
+              type="button"
+              onClick={onOpenBoardSettings}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Board-wide settings (card appearance, and more)"
+            >
+              <Sliders size={14} className="text-[#B58D3D]" />
+              <span>Board</span>
             </button>
           )}
 

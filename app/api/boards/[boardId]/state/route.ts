@@ -18,7 +18,7 @@ export async function GET(
     await ensureSchema();
     const sql = getSql();
 
-    const rows = await sql`SELECT members, tabs, updated_at FROM boards WHERE id = ${boardId} LIMIT 1`;
+    const rows = await sql`SELECT members, tabs, settings, updated_at FROM boards WHERE id = ${boardId} LIMIT 1`;
     if (rows.length === 0) return NextResponse.json({ error: 'Board not found.' }, { status: 404 });
 
     const board = rows[0];
@@ -32,6 +32,7 @@ export async function GET(
       username: user.displayName,
       role: member.role,
       updatedAt: board.updated_at ?? null,
+      settings: board.settings ?? {},
       // Strip per-field restricted content (e.g. DM-only fields) before
       // sending — the stored data is never mutated.
       tabs: scrubTabsForUser(board.tabs || [], { id: user.id, role: member.role }),
@@ -62,7 +63,7 @@ export async function POST(
       return NextResponse.json({ error: 'You are not a member of this board.' }, { status: 403 });
     }
 
-    const { tabs } = (await request.json()) as { tabs?: any[] };
+    const { tabs, settings } = (await request.json()) as { tabs?: any[]; settings?: Record<string, unknown> };
     let updatedAt: string | null = null;
     if (tabs) {
       // Merge on top of stored state so clients can never overwrite or delete
@@ -76,6 +77,21 @@ export async function POST(
       const synced = syncLinkTitles(merged);
       const updated = await sql`
         UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
+        RETURNING updated_at
+      `;
+      updatedAt = updated[0]?.updated_at ?? null;
+    }
+
+    // Board-wide settings are DM-only: players may read them (the GET above
+    // ships them to everyone so card rendering stays consistent) but only the
+    // DM may change them. Merged onto stored settings so a client can never
+    // wipe settings it didn't load.
+    if (settings && member.role === 'dm') {
+      const storedRows = await sql`SELECT settings FROM boards WHERE id = ${boardId} LIMIT 1`;
+      const storedSettings: Record<string, unknown> = storedRows[0]?.settings ?? {};
+      const mergedSettings = { ...storedSettings, ...settings };
+      const updated = await sql`
+        UPDATE boards SET settings = ${JSON.stringify(mergedSettings)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
         RETURNING updated_at
       `;
       updatedAt = updated[0]?.updated_at ?? null;

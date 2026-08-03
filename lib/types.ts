@@ -179,6 +179,16 @@ export type BoardTab = {
   annotations?: BoardAnnotation[];
 };
 
+/**
+ * Board-wide settings managed by the DM (Board Settings dialog). Stored in
+ * the boards.settings JSONB column. Fields are optional so new settings can
+ * be added without migrating existing rows.
+ */
+export type BoardSettings = {
+  /** Multiplier applied to every piece of text on canvas board-item cards (1 = 100%). */
+  cardFontScale?: number;
+};
+
 export type BoardState = {
   tabs?: BoardTab[];
   activeTabId?: string;

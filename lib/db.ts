@@ -46,6 +46,7 @@ export async function ensureSchema(): Promise<void> {
       board_password_salt TEXT,
       members JSONB NOT NULL DEFAULT '{}'::jsonb,
       tabs JSONB NOT NULL DEFAULT '[]'::jsonb,
+      settings JSONB NOT NULL DEFAULT '{}'::jsonb,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
   `;
@@ -56,6 +57,7 @@ export async function ensureSchema(): Promise<void> {
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS board_password_salt TEXT`;
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '{}'::jsonb`;
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS tabs JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb`;
 }
 
 // Old name, kept so nothing else in the app has to change.
