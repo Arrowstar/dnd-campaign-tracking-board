@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download } from 'lucide-react';
+import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download, Link2 } from 'lucide-react';
 import { BoardSettings } from '@/lib/types';
+import ShareLinksModal from './ShareLinksModal';
 
 const CARD_FONT_SCALE_MIN = 75;
 const CARD_FONT_SCALE_MAX = 150;
@@ -36,6 +37,7 @@ export default function BoardSettingsModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [isSharesOpen, setIsSharesOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -228,6 +230,31 @@ export default function BoardSettingsModal({
             </p>
           </div>
 
+          {/* Section: Sharing */}
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Link2 size={15} className="text-[#B58D3D]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#B58D3D]">Sharing</span>
+              <span className="text-[10px] text-[#8C7B6E]">Read-only view links for players</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSharesOpen(true)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer"
+              style={{ background: 'rgba(181,141,61,0.12)', border: '1px solid rgba(181,141,61,0.3)', color: '#B58D3D' }}
+            >
+              <Link2 size={15} />
+              Manage share links
+            </button>
+
+            <p className="text-[11px] text-[#8C7B6E] leading-relaxed mt-2">
+              Mint links that let anyone with the URL view the board — no account, no login, no
+              board password. DM-only and owner-only content stays hidden. Revoking a link kills
+              it instantly.
+            </p>
+          </div>
+
           {/* Feedback */}
           {error && (
             <div
@@ -271,6 +298,13 @@ export default function BoardSettingsModal({
           </button>
         </div>
       </div>
+
+      <ShareLinksModal
+        isOpen={isSharesOpen}
+        onClose={() => setIsSharesOpen(false)}
+        boardId={boardId}
+        sessionToken={sessionToken}
+      />
     </div>
   );
 }

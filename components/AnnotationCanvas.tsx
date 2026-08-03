@@ -33,6 +33,9 @@ interface AnnotationCanvasProps {
   zoomScale: number;
   positionX: number;
   positionY: number;
+  /** Feature 09 — read-only share view: no selection, no drawing, no editing
+   *  (renders the annotation layer only). */
+  readOnly?: boolean;
 }
 
 export default function AnnotationCanvas({
@@ -56,6 +59,7 @@ export default function AnnotationCanvas({
   zoomScale,
   positionX,
   positionY,
+  readOnly = false,
 }: AnnotationCanvasProps) {
   const [showFullInspector, setShowFullInspector] = useState<boolean>(false);
   const [editingTextAnnId, setEditingTextAnnId] = useState<string | null>(null);
@@ -97,12 +101,13 @@ export default function AnnotationCanvas({
   } | null>(null);
 
   const canEdit = useCallback((annId: string) => {
+    if (readOnly) return false;
     if (!user) return false;
     if (user.role === 'dm') return true;
     const ann = annotations.find(a => a.id === annId);
     if (!ann) return false;
     return !ann.ownerId || ann.ownerId === user.id;
-  }, [user, annotations]);
+  }, [user, annotations, readOnly]);
 
   const selectedAnn = annotations.find((a) => a.id === selectedAnnId);
 
@@ -127,9 +132,10 @@ export default function AnnotationCanvas({
 
   // Callback to initiate dragging a pin handle (e.g. from Inspector)
   const handleStartDragPinHandle = useCallback((annId: string, handleIndex: number, e: React.PointerEvent) => {
+    if (readOnly) return;
     onSelectAnnotation(annId);
     setDraggingHandle({ annId, handleIndex });
-  }, [onSelectAnnotation]);
+  }, [onSelectAnnotation, readOnly]);
 
   // Global pointer listeners while dragging a pin handle or moving an annotation
   useEffect(() => {
@@ -204,6 +210,7 @@ export default function AnnotationCanvas({
 
   // ── Canvas Pointer Down (Drawing or Selecting) ──────────────────────────────
   const handlePointerDownCanvas = (e: React.PointerEvent<SVGElement>) => {
+    if (readOnly) return;
     // Only trigger drawing if an annotation tool is active
     if (!activeTool || !activeTool.startsWith('ann_')) {
       if (selectedAnnId) onSelectAnnotation(null);

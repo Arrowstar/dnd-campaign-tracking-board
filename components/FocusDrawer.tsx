@@ -66,6 +66,10 @@ interface FocusDrawerProps {
   allTagNames?: string[];
   /** Persist a settings change (DM only) — used to create tag definitions. */
   onUpdateSettings?: (settings: BoardSettings) => void;
+  /** Feature 09 — read-only share view: hides every edit affordance (title,
+   *  fields, tags, delete, visibility/owner menus, Board Card tab, comment
+   *  input, width resize). Content + read-only Comments remain. */
+  readOnly?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,6 +116,7 @@ export default function FocusDrawer({
   tagDefs,
   allTagNames,
   onUpdateSettings,
+  readOnly = false,
 }: FocusDrawerProps) {
   const [activeTab, setActiveTab] = useState<'content' | 'comments' | 'preview'>('content');
   const [commentText, setCommentText] = useState('');
@@ -120,7 +125,7 @@ export default function FocusDrawer({
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
   const [showOwnerMenu, setShowOwnerMenu] = useState(false);
 
-  const canEdit = !item || item.ownerId === user.id || user.role === 'dm';
+  const canEdit = !readOnly && (!item || item.ownerId === user.id || user.role === 'dm');
   const itemColor = item?.color || '#423D38';
   const isLight = isLightColor(itemColor);
   const ownerName = item?.ownerName || item?.ownerId || 'Unknown';
@@ -257,14 +262,16 @@ export default function FocusDrawer({
         className="h-full bg-[#FDFAF6] border-l-2 border-[#B58D3D]/60 flex flex-col shadow-2xl relative select-none z-40"
       >
         {/* Resize handle — drag left edge to resize */}
-        <div
-          className="absolute top-0 left-0 w-2 h-full cursor-ew-resize z-50 group"
-          onPointerDown={handleResizePointerDown}
-        >
-          <div className="w-full h-full opacity-0 group-hover:opacity-100 transition-opacity bg-[#B58D3D]/30 flex items-center justify-center">
-            <GripVertical size={12} className="text-[#B58D3D]" />
+        {!readOnly && (
+          <div
+            className="absolute top-0 left-0 w-2 h-full cursor-ew-resize z-50 group"
+            onPointerDown={handleResizePointerDown}
+          >
+            <div className="w-full h-full opacity-0 group-hover:opacity-100 transition-opacity bg-[#B58D3D]/30 flex items-center justify-center">
+              <GripVertical size={12} className="text-[#B58D3D]" />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div
@@ -438,7 +445,7 @@ export default function FocusDrawer({
                 />
               ) : item.type === 'image' ? (
                 <ImageBoardItemContent item={item} canEdit={canEdit} onUpdate={onUpdate} />
-              ) : (
+              ) : canEdit ? (
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Content</label>
                   <RichTextEditor
@@ -448,6 +455,13 @@ export default function FocusDrawer({
                     isLight={true}
                     className="w-full"
                   />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Content</label>
+                  <div className="bg-white border border-[#D9D0C1] rounded-lg p-3 text-sm text-[#2C2824] leading-relaxed">
+                    <RichTextDisplay content={item.content || ''} />
+                  </div>
                 </div>
               )}
 
@@ -533,7 +547,7 @@ export default function FocusDrawer({
                         <span className="text-[#423D38] font-bold">{c.userName}</span>
                         <div className="flex items-center gap-2">
                           <span className="font-normal opacity-60 italic">{c.timestamp}</span>
-                          {(c.userId === user.id || user.role === 'dm' || item.ownerId === user.id) && (
+                          {!readOnly && (c.userId === user.id || user.role === 'dm' || item.ownerId === user.id) && (
                             <button
                               type="button"
                               onClick={() => onUpdate({ ...item, comments: item.comments.filter(comm => comm.id !== c.id) })}
@@ -553,8 +567,9 @@ export default function FocusDrawer({
                 )}
               </div>
 
-              <div className="pt-2 border-t border-[#D9D0C1]">
-                {!isWritingComment ? (
+              {!readOnly && (
+                <div className="pt-2 border-t border-[#D9D0C1]">
+                  {!isWritingComment ? (
                   <button
                     type="button"
                     onClick={() => setIsWritingComment(true)}
@@ -593,7 +608,8 @@ export default function FocusDrawer({
                     </div>
                   </div>
                 )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 

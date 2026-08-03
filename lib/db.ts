@@ -82,6 +82,25 @@ export async function ensureSchema(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedupe_idx
       ON notifications (user_id, board_id, item_id, comment_id);
   `;
+
+  // Feature 09 — read-only share links. Tokens are high-entropy bearer
+  // secrets (generateToken(), 32 random bytes hex) stored raw, same as
+  // session tokens. Board deletion (F07) cascades links; links are board
+  // resources, not user resources, so account deletion leaves them intact.
+  await sql`
+    CREATE TABLE IF NOT EXISTS board_shares (
+      token TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      label TEXT NOT NULL DEFAULT 'View link',
+      created_by UUID,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      expires_at TIMESTAMP WITH TIME ZONE
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS board_shares_board_idx
+      ON board_shares (board_id);
+  `;
 }
 
 // Old name, kept so nothing else in the app has to change.

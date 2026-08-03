@@ -67,12 +67,15 @@ export default function Home() {
   // ── Session check on mount ─────────────────────────────────────────────────
   useEffect(() => {
     const raw = localStorage.getItem('dnd_session');
-    if (!raw) { setIsLoadingSession(false); return; }
+    if (!raw) { // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsLoadingSession(false); return; }
 
     let parsed: { sessionToken?: string } = {};
-    try { parsed = JSON.parse(raw); } catch { setIsLoadingSession(false); return; }
+    try { parsed = JSON.parse(raw); } catch {  
+      setIsLoadingSession(false); return; }
 
-    if (!parsed.sessionToken) { setIsLoadingSession(false); return; }
+    if (!parsed.sessionToken) {  
+      setIsLoadingSession(false); return; }
 
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${parsed.sessionToken}` } })
       .then(r => r.ok ? r.json() : null)
@@ -90,6 +93,7 @@ export default function Home() {
   // ── Load boards when session changes ──────────────────────────────────────
   useEffect(() => {
     if (!session) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoadingBoards(true);
     fetch('/api/auth/my-boards', { headers: { Authorization: `Bearer ${session.sessionToken}` } })
       .then(r => r.json())
@@ -97,6 +101,18 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setIsLoadingBoards(false));
   }, [session]);
+
+  // ── Share-view "Request to join" prefill (?join=<boardId>, Feature 09) ─────
+  // From the read-only view page's join CTA: drop straight into the join form
+  // with the board id filled in. Cleaned from the URL so it can't re-trigger.
+  useEffect(() => {
+    const joinParam = new URLSearchParams(window.location.search).get('join');
+    if (!joinParam) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJoinBoardId(joinParam.trim().toLowerCase());
+    setLobbyView('join');
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   // ── Auth submit ────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {

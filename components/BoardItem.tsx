@@ -359,6 +359,10 @@ interface BoardItemProps {
   activeTagFilter?: string[];
   /** True when the card is filtered out (dimmed, not hidden). */
   dimmed?: boolean;
+  /** Feature 09 — read-only share view: disables all edit affordances (drag,
+   *  resize, controls, image drop) regardless of `user`. Clicking still opens
+   *  the focus drawer and cross-link navigation still works. */
+  readOnly?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -827,6 +831,7 @@ export default memo(function BoardItem({
   tagDefs,
   activeTagFilter = [],
   dimmed,
+  readOnly = false,
 }: BoardItemProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef(onReportDimensions);
@@ -842,7 +847,7 @@ export default memo(function BoardItem({
     return () => observer.disconnect();
   }, [item.id, item.width, item.height, item.minimized]);
 
-  const canEdit = item.ownerId === user.id || user.role === 'dm';
+  const canEdit = !readOnly && (item.ownerId === user.id || user.role === 'dm');
   const itemColor = item.color || '#423D38';
   const isLight = isLightColor(itemColor);
   const ownerName = item.ownerName || item.ownerId || 'Unknown';

@@ -25,6 +25,7 @@ import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
 import BoardSettingsModal from './BoardSettingsModal';
 import GlobalSearchModal from './GlobalSearchModal';
 import { recordRecentItem } from '@/lib/search';
+import { navigateToItem, flashItemElement, getCanvasViewport, POLL_INTERVAL_MS } from '@/lib/viewNavigation';
 import NotificationBell from './NotificationBell';
 import type { NotificationRow } from '@/app/api/boards/[boardId]/notifications/route';
 
@@ -484,7 +485,7 @@ export default function Board({ boardId }: { boardId: string }) {
       })
       .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; settings?: BoardSettings; updatedAt?: string | null } | null) => {
         if (!data) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+         
         setUser({
           id: data.userId,
           name: data.username,
@@ -496,7 +497,7 @@ export default function Board({ boardId }: { boardId: string }) {
           appliedRevisionRef.current = data.updatedAt;
         }
         if (data.settings && typeof data.settings === 'object') {
-          // eslint-disable-next-line react-hooks/set-state-in-effect
+           
           setBoardSettings(data.settings);
         }
         let parsedTabs: BoardTab[] = [];
@@ -548,7 +549,6 @@ export default function Board({ boardId }: { boardId: string }) {
   useEffect(() => {
     if (!user || !user.sessionToken) return;
 
-    const POLL_INTERVAL_MS = 3000;
     let cancelled = false;
     let inFlight = false;
 
@@ -1536,6 +1536,7 @@ export default function Board({ boardId }: { boardId: string }) {
   /**
    * Pan & zoom the canvas so the given board item is centered in view.
    * Called when a user clicks a linked-item chip inside a board card.
+   * Shared with the read-only BoardView via lib/viewNavigation.
    */
   const handleScrollToItem = useCallback((targetId: string) => {
     // Check if item belongs to another tab
@@ -1545,38 +1546,21 @@ export default function Board({ boardId }: { boardId: string }) {
     }
 
     setTimeout(() => {
-      const targetItem = allBoardItems.find(i => i.id === targetId);
-      if (!targetItem || !setTransformRef.current) return;
-
-      const wrapperEl = (document.querySelector('.react-transform-component') || document.querySelector('.react-transform-wrapper')) as HTMLElement | null;
-      const viewportW = wrapperEl ? wrapperEl.clientWidth : (typeof window !== 'undefined' ? window.innerWidth - 240 : 1200);
-      const viewportH = wrapperEl ? wrapperEl.clientHeight : (typeof window !== 'undefined' ? (window.innerHeight - 64) : 800);
-
-      const el = document.getElementById(targetId);
-      const itemW = el?.offsetWidth || itemDimensions[targetId]?.width || targetItem.width || 300;
-      const itemH = el?.offsetHeight || itemDimensions[targetId]?.height || targetItem.height || 200;
-
-      const itemCenterX = targetItem.x + itemW / 2;
-      const itemCenterY = targetItem.y + itemH / 2;
-
-      const currentScale = transformRef.current.scale || 1;
-      const targetScale = Math.min(Math.max(currentScale, 0.6), 1.5);
-
-      const newX = viewportW / 2 - itemCenterX * targetScale;
-      const newY = viewportH / 2 - itemCenterY * targetScale;
-
-      setTransformRef.current(newX, newY, targetScale, 400);
-
-      // Flash-highlight the item briefly
-      if (el) {
-        el.style.transition = 'box-shadow 0.2s, ring 0.2s';
-        el.style.boxShadow = '0 0 0 4px #B58D3D, 0 0 32px 8px #B58D3D88';
-        setTimeout(() => {
-          el.style.boxShadow = '';
-        }, 1600);
-      }
+      const vp = getCanvasViewport(1200, 800);
+      const target = navigateToItem({
+        tabs,
+        activeTabId,
+        targetId,
+        itemDimensions,
+        viewportW: vp.width,
+        viewportH: vp.height,
+        currentScale: transformRef.current.scale || 1,
+      });
+      if (!target || !setTransformRef.current) return;
+      setTransformRef.current(target.x, target.y, target.scale, target.duration);
+      flashItemElement(targetId);
     }, 50);
-  }, [tabs, activeTabId, allBoardItems, itemDimensions]);
+  }, [tabs, activeTabId, itemDimensions]);
 
   // Feature 08 — notification click: open the drawer on the mentioned card,
   // comments tab first. The drawer consumes the request once the item is

@@ -49,7 +49,8 @@ export default function MemberManagementModal({
   };
 
   useEffect(() => {
-    if (isOpen) fetchMembers();
+    if (isOpen) // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchMembers();
   }, [isOpen, boardId]);
 
   if (!isOpen) return null;

@@ -207,6 +207,27 @@ export type BoardState = {
   annotations?: BoardAnnotation[];
 };
 
+/** A read-only share link (Feature 09), as listed to the DM. */
+export type ShareLink = {
+  token: string;
+  label: string;
+  createdAt: string;
+  expiresAt: string | null;
+};
+
+/**
+ * Least-privilege board payload for anonymous share viewers (Feature 09).
+ * Fields are per-user scrubbed and items filtered to `visibility === 'all'`
+ * server-side; `title` is the board id today (no board-name field exists).
+ */
+export type BoardViewPayload = {
+  boardId: string;
+  title: string;
+  updatedAt: string | null;
+  settings: BoardSettings;
+  tabs: BoardTab[];
+};
+
 /**
  * Canonical board export/import file (Feature 06). The export is the
  * unscrubbed server state — DM-only. Blob URLs are kept as-is; the blobs
