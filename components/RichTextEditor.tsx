@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { Extension } from '@tiptap/core';
+import Suggestion from '@tiptap/suggestion';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -50,6 +52,10 @@ import {
 } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import UploadProgress from './UploadProgress';
+import MentionAutocomplete, {
+  MentionableMember,
+  filterMembers,
+} from './MentionAutocomplete';
 
 interface RichTextEditorProps {
   value: string;
@@ -59,6 +65,11 @@ interface RichTextEditorProps {
   isLight?: boolean;
   compact?: boolean;
   disabled?: boolean;
+  /**
+   * Feature 08 — when provided, typing `@` in this editor shows a member
+   * autocomplete; selecting a member inserts a plain `@username` mention.
+   */
+  mentions?: MentionableMember[];
 }
 
 const FONT_SIZES = [
@@ -145,6 +156,7 @@ export function RichTextEditor({
   isLight = true,
   compact = false,
   disabled = false,
+  mentions,
 }: RichTextEditorProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showFontSizePicker, setShowFontSizePicker] = useState(false);
@@ -156,6 +168,105 @@ export function RichTextEditor({
   const skipNextUpdate = useRef(false);
   // In-flight image upload progress (toolbar "Insert Image").
   const [imageUpload, setImageUpload] = useState<{ percent: number; error: string | null } | null>(null);
+
+  // Feature 08 — @mention autocomplete. The suggestion plugin reads the LATEST
+  // member list through this ref (the editor/extension is created once, so
+  // props captured at first render would go stale). Empty/undefined list =
+  // plugin stays inert.
+  const mentionsRef = useRef<MentionableMember[]>(mentions || []);
+  mentionsRef.current = mentions || [];
+
+  // Extension created per render but only the first instance is used by the
+  // editor (useEditor without deps); all closures read mentionsRef live.
+  const MentionSuggestionExtension = Extension.create({
+    name: 'mentionSuggestion',
+    addProseMirrorPlugins() {
+      return [
+        Suggestion<MentionableMember, { member: MentionableMember }>({
+          editor: this.editor,
+          char: '@',
+          // Multi-word usernames ("jo smith") are real — keep typing spaces.
+          allowSpaces: true,
+          allowedPrefixes: [' ', '\n'],
+          shouldShow: () => mentionsRef.current.length > 0,
+          items: ({ query }) => filterMembers(mentionsRef.current, query),
+          command: ({ editor: ed, range, props }) => {
+            // Plain-text insertion — mentions have no dedicated node type.
+            ed.chain().focus().insertContentAt(range, `@${props.member.username} `).run();
+          },
+          render: () => {
+            let component: ReactRenderer | null = null;
+            let unmount: (() => void) | null = null;
+            let highlighted = 0;
+            let currentItems: MentionableMember[] = [];
+            let command: ((props: { member: MentionableMember }) => void) | null = null;
+            const push = (items: MentionableMember[] = currentItems) => {
+              component?.updateProps({
+                items,
+                highlighted,
+                onSelect: (member: MentionableMember) => command?.({ member }),
+              });
+            };
+            return {
+              onStart: props => {
+                highlighted = 0;
+                currentItems = props.items;
+                command = props.command;
+                component = new ReactRenderer(MentionAutocomplete, {
+                  props: {
+                    items: props.items,
+                    highlighted,
+                    onSelect: (member: MentionableMember) => props.command({ member }),
+                    onHover: (i: number) => {
+                      highlighted = i;
+                      push();
+                    },
+                  },
+                  editor: props.editor,
+                });
+                unmount = props.mount(component.element);
+              },
+              onUpdate: props => {
+                currentItems = props.items;
+                command = props.command;
+                highlighted = Math.min(highlighted, Math.max(0, props.items.length - 1));
+                push();
+              },
+              onKeyDown: ({ event }) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  highlighted = currentItems.length === 0 ? 0 : (highlighted + 1) % currentItems.length;
+                  push();
+                  return true;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  highlighted = currentItems.length === 0 ? 0 : (highlighted - 1 + currentItems.length) % currentItems.length;
+                  push();
+                  return true;
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  const member = currentItems[highlighted];
+                  if (member) {
+                    event.preventDefault();
+                    command?.({ member });
+                    return true;
+                  }
+                }
+                return false;
+              },
+              onExit: () => {
+                unmount?.();
+                unmount = null;
+                component?.destroy();
+                component = null;
+              },
+            };
+          },
+        }),
+      ];
+    },
+  });
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -175,6 +286,7 @@ export function RichTextEditor({
       TableRow,
       TableHeader,
       TableCell,
+      MentionSuggestionExtension,
     ],
     editorProps: {
       attributes: getEditorAttributes(isLight, compact),

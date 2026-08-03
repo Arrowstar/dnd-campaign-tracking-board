@@ -4,6 +4,12 @@ import { getAuthUser } from '@/lib/auth';
 import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
 import { syncLinkTitles } from '@/lib/crossref';
 import { mergeTagDefs } from '@/lib/tags';
+import {
+  diffComments,
+  planMentionNotifications,
+  applyMentionNotifications,
+  normalizeUsername,
+} from '@/lib/mentions';
 
 export const runtime = 'nodejs';
 
@@ -76,6 +82,23 @@ export async function POST(
       const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role }, memberIds);
       // Keep link-token title snapshots in sync with item titles.
       const synced = syncLinkTitles(merged);
+
+      // Feature 08 — @mention notifications. This is the single comment write
+      // path, so detect mentions here (never trust the client). Covers the
+      // polled state too: remote commenters notify without any client work.
+      const storedMembers: Record<string, { role: string }> = rows[0].members || {};
+      const memberUsernameRows = await sql`
+        SELECT id, username FROM users WHERE id = ANY(${Array.from(memberIds)})
+      `;
+      const memberUsernameToId: Record<string, string> = {};
+      for (const r of memberUsernameRows) {
+        if (storedMembers[r.id]) memberUsernameToId[normalizeUsername(r.username)] = r.id;
+      }
+      const { newComments, removedCommentIds } = diffComments(storedTabs, synced);
+      const plan = planMentionNotifications(boardId, memberUsernameToId, newComments);
+      // Deleted comments take their notifications with them (dead-link guard).
+      await applyMentionNotifications(sql, boardId, plan, removedCommentIds);
+
       const updated = await sql`
         UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
         RETURNING updated_at

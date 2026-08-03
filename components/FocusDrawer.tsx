@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X, ChevronRight, Settings, Trash2, MessageSquare, Globe, Eye, Lock,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout, TagDef, BoardSettings } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
+import { highlightMentions } from '@/lib/mentions';
 import TagEditor from './TagEditor';
 import NpcBoardItemFields from './NpcBoardItemFields';
 import StructuredBoardItemFields, { FieldDef, parseStructured } from './StructuredBoardItemFields';
@@ -46,8 +47,12 @@ interface FocusDrawerProps {
   typeLabel: string;
   /** Board member display names, used for member-select widgets. */
   memberNames?: string[];
-  /** Board member records, used for the DM owner picker. */
-  members?: { id: string; displayName: string }[];
+  /** Board member records, used for the DM owner picker + @mentions (Feature 08). */
+  members?: { id: string; displayName: string; username?: string; role?: 'dm' | 'player' }[];
+  /** Deep-link: switch to this tab when the drawer opens on an item (Feature 08 notifications). */
+  initialTab?: 'content' | 'comments' | 'preview';
+  /** Board clears its deep-link request once the drawer has applied initialTab. */
+  onInitialTabConsumed?: () => void;
   onUpdate: (item: BoardItemType) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -96,6 +101,8 @@ export default function FocusDrawer({
   typeLabel,
   memberNames,
   members,
+  initialTab,
+  onInitialTabConsumed,
   onUpdate,
   onDelete,
   onClose,
@@ -137,6 +144,29 @@ export default function FocusDrawer({
     setShowOwnerMenu(false);
   }
   }
+
+  // ── Deep-link (Feature 08): when Board asks for a specific tab while the
+  // drawer is (or becomes) focused on an item, apply it once, then tell Board
+  // so it can clear the request. Board's inline onInitialTabConsumed callback
+  // changes identity every render, but by then initialTab is null and the
+  // guard below makes the re-run a no-op.
+  useEffect(() => {
+    if (!item || !initialTab) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven deep-link; must apply when the item arrives
+    setActiveTab(initialTab);
+    onInitialTabConsumed?.();
+  }, [item, initialTab, onInitialTabConsumed]);
+
+  // Feature 08 — @mention autocomplete vocabulary for the comment editor and
+  // highlight vocabulary for rendered comments. Derives stable keys from the
+  // member records; falls back to displayName for members without a username.
+  const mentionableMembers: { id: string; username: string; displayName: string; role?: 'dm' | 'player' }[] =
+    (members || []).map(m => ({ id: m.id, username: m.username || m.displayName, displayName: m.displayName, role: m.role }));
+  const memberUsernames = useMemo(
+    () => mentionableMembers.map(m => m.username),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [members]
+  );
 
   // ── Resize handle ──────────────────────────────────────────────────────────
   const resizeRef = useRef<boolean>(false);
@@ -516,7 +546,7 @@ export default function FocusDrawer({
                         </div>
                       </div>
                       <div className="text-xs text-[#2C2824] leading-normal font-sans font-normal">
-                        <RichTextDisplay content={c.text} />
+                        <RichTextDisplay content={highlightMentions(c.text, memberUsernames)} />
                       </div>
                     </div>
                   ))
@@ -542,6 +572,7 @@ export default function FocusDrawer({
                       compact={true}
                       isLight={true}
                       className="w-full"
+                      mentions={mentionableMembers}
                     />
                     <div className="flex justify-end gap-2">
                       <button

@@ -58,6 +58,30 @@ export async function ensureSchema(): Promise<void> {
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '{}'::jsonb`;
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS tabs JSONB NOT NULL DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE boards ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb`;
+
+  // Feature 08 — @mention notifications. FKs do the lifecycle work: deleting a
+  // board or user (Feature 07) cascades their notifications.
+  await sql`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      item_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      read BOOLEAN NOT NULL DEFAULT FALSE
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS notifications_user_unread_idx
+      ON notifications (user_id, read) WHERE read = FALSE;
+  `;
+  // Makes mention insertion idempotent: re-saving the same comment (retries,
+  // undo/redo) can never create a duplicate notification row.
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedupe_idx
+      ON notifications (user_id, board_id, item_id, comment_id);
+  `;
 }
 
 // Old name, kept so nothing else in the app has to change.

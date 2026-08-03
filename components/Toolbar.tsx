@@ -78,6 +78,8 @@ interface ToolbarProps {
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  /** Feature 08 — rendered as-is in the toolbar's right cluster. */
+  notificationBell?: React.ReactNode;
 }
 
 export default function Toolbar({ 
@@ -114,6 +116,7 @@ export default function Toolbar({
   canRedo,
   onUndo,
   onRedo,
+  notificationBell,
 }: ToolbarProps) {
   const [showConnectSettings, setShowConnectSettings] = useState(false);
   const [showAnnSettings, setShowAnnSettings] = useState(false);
@@ -257,6 +260,8 @@ export default function Toolbar({
         </div>
 
         <div className="flex items-center gap-3 px-2">
+          {notificationBell}
+
           {/* Annotation Tools Selector */}
           <div className="flex items-center gap-1 bg-[#37332F] p-1 rounded-lg border border-[#423D38]">
             <span className="text-[10px] font-bold text-[#A89F91] uppercase tracking-wider px-1.5 hidden md:inline">

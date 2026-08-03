@@ -25,6 +25,8 @@ import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
 import BoardSettingsModal from './BoardSettingsModal';
 import GlobalSearchModal from './GlobalSearchModal';
 import { recordRecentItem } from '@/lib/search';
+import NotificationBell from './NotificationBell';
+import type { NotificationRow } from '@/app/api/boards/[boardId]/notifications/route';
 
 const BOARD_ITEM_LOD_THRESHOLDS = {
   fullWidth: 130,
@@ -86,8 +88,10 @@ export default function Board({ boardId }: { boardId: string }) {
 
   // Board member display names (for member-select field widgets)
   const [memberNames, setMemberNames] = useState<string[]>([]);
-  // Full member records (for the DM owner picker in the focus drawer)
-  const [boardMembers, setBoardMembers] = useState<{ id: string; displayName: string }[]>([]);
+  // Full member records (DM owner picker + @mention vocabulary, Feature 08)
+  const [boardMembers, setBoardMembers] = useState<
+    { id: string; displayName: string; username?: string; role?: 'dm' | 'player' }[]
+  >([]);
 
   useEffect(() => {
     if (!user) return;
@@ -98,11 +102,58 @@ export default function Board({ boardId }: { boardId: string }) {
       .then(data => {
         if (data.members) {
           setMemberNames((data.members as { displayName: string }[]).map(m => m.displayName));
-          setBoardMembers((data.members as { id: string; displayName: string }[]).map(m => ({ id: m.id, displayName: m.displayName })));
+          setBoardMembers((data.members as { id: string; displayName: string; username?: string; role?: 'dm' | 'player' }[]).map(m => ({
+            id: m.id,
+            displayName: m.displayName,
+            username: m.username || '',
+            role: m.role,
+          })));
         }
       })
       .catch(() => { /* member options are non-critical; field widgets fall back to Custom */ });
   }, [boardId, user]);
+
+  // ── Feature 08 — @mention notifications ────────────────────────────────────
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [focusInitialTab, setFocusInitialTab] = useState<'content' | 'comments' | 'preview' | null>(null);
+
+  const refreshNotifications = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/notifications`, {
+        headers: { Authorization: `Bearer ${user.sessionToken}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+    } catch (err) {
+      console.error('Failed to load notifications:', err);
+    }
+  }, [boardId, user]);
+
+  // Initial load + re-fetch when the board/user context changes.
+  useEffect(() => {
+    refreshNotifications();
+  }, [refreshNotifications]);
+
+  const markNotificationsRead = useCallback(async (ids: number[] | 'all') => {
+    const body = ids === 'all' ? {} : { ids };
+    try {
+      const res = await fetch(`/api/boards/${boardId}/notifications/read`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.sessionToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) refreshNotifications();
+    } catch (err) {
+      console.error('Failed to mark notifications read:', err);
+    }
+  }, [boardId, user?.sessionToken, refreshNotifications]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0] || {
     id: 'default-tab',
@@ -579,6 +630,7 @@ export default function Board({ boardId }: { boardId: string }) {
         if (await applyFullState()) {
           appliedRevisionRef.current = revision;
           setSaveStatus('saved');
+          refreshNotifications();
         }
       } catch (err) {
         console.error('Failed to check board revision:', err);
@@ -600,7 +652,7 @@ export default function Board({ boardId }: { boardId: string }) {
       window.removeEventListener('focus', poll);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [boardId, user]);
+  }, [boardId, user, refreshNotifications]);
 
   // All saves are chained onto this promise so requests hit the server strictly
   // in order — otherwise two concurrent saves can resolve out of order and an
@@ -650,6 +702,9 @@ export default function Board({ boardId }: { boardId: string }) {
           }
           setSaveError(null);
           setSaveStatus('saved');
+          // Feature 08 — a saved comment may carry a new @mention; refresh the
+          // bell immediately instead of waiting for the next poll cycle.
+          refreshNotifications();
         } catch (err) {
           console.error('Error saving board state:', err);
           setSaveError("Your last change couldn't be saved. Retrying automatically.");
@@ -657,7 +712,7 @@ export default function Board({ boardId }: { boardId: string }) {
         }
       });
     },
-    [boardId, user?.sessionToken]
+    [boardId, user?.sessionToken, refreshNotifications]
   );
 
   const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string) => {
@@ -1320,6 +1375,9 @@ export default function Board({ boardId }: { boardId: string }) {
 
   const handleCloseFocus = useCallback(() => {
     setFocusedItemId(null);
+    // Feature 08 — drop any pending deep-link tab so a later manual open of a
+    // card isn't hijacked by a stale "comments" request.
+    setFocusInitialTab(null);
   }, []);
 
   // Selecting an annotation deselects any selected board item (and vice versa),
@@ -1520,6 +1578,15 @@ export default function Board({ boardId }: { boardId: string }) {
     }, 50);
   }, [tabs, activeTabId, allBoardItems, itemDimensions]);
 
+  // Feature 08 — notification click: open the drawer on the mentioned card,
+  // comments tab first. The drawer consumes the request once the item is
+  // present (it may be on another tab — handleScrollToItem switches tabs).
+  const handleNotificationClick = useCallback((n: NotificationRow) => {
+    setFocusInitialTab('comments');
+    setFocusedItemId(n.itemId);
+    handleScrollToItem(n.itemId);
+  }, [handleScrollToItem]);
+
   /**
    * Global-search navigation: close the overlay, then reuse the cross-link
    * navigation path (tab switch + pan/zoom + flash highlight). Unlike
@@ -1580,6 +1647,15 @@ export default function Board({ boardId }: { boardId: string }) {
         canRedo={redoCount > 0}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        notificationBell={
+          <NotificationBell
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onMarkAllRead={() => markNotificationsRead('all')}
+            onMarkRead={(ids) => markNotificationsRead(ids)}
+            onNotificationClick={handleNotificationClick}
+          />
+        }
       />
       <TabBar
         tabs={tabs}
@@ -2327,6 +2403,8 @@ export default function Board({ boardId }: { boardId: string }) {
               onScrollToItem={handleScrollToItem}
               memberNames={memberNames}
               members={boardMembers}
+              initialTab={focusInitialTab ?? undefined}
+              onInitialTabConsumed={() => setFocusInitialTab(null)}
               width={drawerWidth}
               onWidthChange={setDrawerWidth}
               tagDefs={tagDefs}

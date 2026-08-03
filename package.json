@@ -27,6 +27,7 @@
     "@tiptap/pm": "^3.29.2",
     "@tiptap/react": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",
+    "@tiptap/suggestion": "^3.29.2",
     "@vercel/blob": "^2.6.1",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
