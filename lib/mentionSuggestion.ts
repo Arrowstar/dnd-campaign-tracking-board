@@ -47,8 +47,16 @@ export function createMentionSuggestion(
           // Multi-word usernames ("jo smith") are real — keep typing spaces.
           allowSpaces: true,
           allowedPrefixes: [' ', '\n'],
-          shouldShow: () => getMentions().length > 0,
-          items: ({ query }) => filterMembers(getMentions(), query),
+          shouldShow: () => {
+            const n = getMentions().length;
+            console.log('[MENTION] shouldShow', { memberCount: n, show: n > 0 });
+            return n > 0;
+          },
+          items: ({ query }) => {
+            const list = filterMembers(getMentions(), query);
+            console.log('[MENTION] items', { query, count: list.length });
+            return list;
+          },
           command: ({ editor: ed, range, props }) => {
             // Plain-text insertion — mentions have no dedicated node type.
             ed.chain().focus().insertContentAt(range, `@${props.member.username} `).run();
@@ -76,6 +84,7 @@ export function createMentionSuggestion(
                 highlighted = 0;
                 currentItems = props.items;
                 command = props.command;
+                console.log('[MENTION] onStart', { itemCount: props.items.length, range: props.range });
                 component = new ReactRenderer(MentionAutocomplete, {
                   props: {
                     items: props.items,

@@ -211,6 +211,20 @@ export function RichTextEditor({
     onTransaction: () => setTick(t => t + 1),
   });
 
+  useEffect(() => {
+    if (mentions !== undefined) {
+      console.log('[MENTION] mentions prop', { length: mentions.length, members: mentions.slice(0, 3) });
+    }
+  }, [mentions]);
+  useEffect(() => {
+    if (editor) {
+      console.log(
+        '[MENTION] editor ready',
+        editor.extensionManager.extensions.map(e => e.name)
+      );
+    }
+  }, [editor]);
+
   // Keep editor in sync with external value changes (undo in drawer, etc.)
   useEffect(() => {
     if (!editor) return;
