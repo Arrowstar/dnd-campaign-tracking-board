@@ -99,6 +99,20 @@ describe('createMentionSuggestion', () => {
       expect(popupText()).toContain('@alice');
       expect(popupText()).toContain('@bob smith');
     });
+    // The popup must be attached to <body> and pinned to the suggestion
+    // (position fixed + coordinates) — an unpositioned popup renders in flow
+    // at the end of the page and is effectively invisible (regression: the
+    // plugin's floating-ui mount left it static at the bottom of the body).
+    const outer = document.querySelector('[data-mention-autocomplete]')?.parentElement;
+    expect(outer).toBeTruthy();
+    if (outer) {
+      expect(document.body.contains(outer)).toBe(true);
+      const s = getComputedStyle(outer);
+      expect(s.position).toBe('fixed');
+      expect(s.visibility).toBe('visible');
+      expect(parseFloat(s.left)).not.toBeNaN();
+      expect(parseFloat(s.top)).not.toBeNaN();
+    }
   });
 
   it('filters as the query grows (prefix match on username)', async () => {

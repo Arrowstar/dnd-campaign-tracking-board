@@ -97,9 +97,35 @@ export function createMentionSuggestion(
                   },
                   editor: props.editor,
                 });
-                unmount = props.mount(component.element);
+                // Mount + position the popup ourselves instead of the plugin's
+                // floating-ui createMount: the popup was landing in <body>
+                // unpositioned (position: static, end of the document, below
+                // the fold). Pin it to the active suggestion decoration span
+                // with position: fixed and re-place on scroll/resize.
+                const element = component.element;
+                document.body.appendChild(element);
+                const place = () => {
+                  const rect = props.editor.view.dom
+                    .querySelector('[data-decoration-id]')
+                    ?.getBoundingClientRect();
+                  if (rect) {
+                    element.style.position = 'fixed';
+                    element.style.left = `${rect.left}px`;
+                    element.style.top = `${rect.bottom + 4}px`;
+                  }
+                  element.style.visibility = 'visible';
+                  element.style.zIndex = '50';
+                };
+                place();
+                window.addEventListener('scroll', place, true);
+                window.addEventListener('resize', place);
+                unmount = () => {
+                  window.removeEventListener('scroll', place, true);
+                  window.removeEventListener('resize', place);
+                  element.remove();
+                };
                 console.log('[MENTION] mounted', {
-                  inBody: document.body.contains(component.element),
+                  inBody: document.body.contains(element),
                   initialized: (props.editor as any).isEditorContentInitialized,
                 });
               },
