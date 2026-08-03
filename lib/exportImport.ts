@@ -245,6 +245,35 @@ function validateItem(item: unknown): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Client-side export download (shared by Board Settings and the delete-board
+// confirm modal). Returns an error message, or null on success. Browser-only —
+// never call this from a server route.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function downloadBoardExport(boardId: string, sessionToken: string): Promise<string | null> {
+  const res = await fetch(`/api/boards/${boardId}/export`, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    return data?.error || 'Failed to export board.';
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  const filename = match?.[1] ?? `${boardId}-${new Date().toISOString().slice(0, 10)}.json`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Id remapping
 // ─────────────────────────────────────────────────────────────────────────────
 

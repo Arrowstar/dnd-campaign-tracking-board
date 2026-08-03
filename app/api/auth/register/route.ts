@@ -29,7 +29,9 @@ export async function POST(request: NextRequest) {
     const sql = getSql();
 
     const lowerUsername = username.trim().toLowerCase();
-    const existing = await sql`SELECT id FROM users WHERE username = ${lowerUsername} LIMIT 1`;
+    // Deleted accounts are renamed (`deleted_<id>`, Feature 07) so this check
+    // also releases their username; the deleted_at filter is defense-in-depth.
+    const existing = await sql`SELECT id FROM users WHERE username = ${lowerUsername} AND deleted_at IS NULL LIMIT 1`;
     if (existing.length > 0) {
       return NextResponse.json({ error: 'That username is already taken.' }, { status: 409 });
     }

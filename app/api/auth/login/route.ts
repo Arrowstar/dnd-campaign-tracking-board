@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const lowerUsername = username.trim().toLowerCase();
     const rows = await sql`
       SELECT id, username, display_name AS "displayName", password_hash AS "passwordHash", salt
-      FROM users WHERE username = ${lowerUsername} LIMIT 1
+      FROM users WHERE username = ${lowerUsername} AND deleted_at IS NULL LIMIT 1
     `;
 
     if (rows.length === 0) {

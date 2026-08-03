@@ -49,7 +49,7 @@ export async function getAuthUser(request: NextRequest): Promise<AuthUser | null
            u.password_hash AS "passwordHash", u.salt
     FROM sessions s
     JOIN users u ON u.id = s.user_id
-    WHERE s.token = ${token}
+    WHERE s.token = ${token} AND u.deleted_at IS NULL
     LIMIT 1
   `;
 

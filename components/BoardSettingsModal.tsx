@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download, Link2 } from 'lucide-react';
+import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download, Link2, AlertTriangle, Trash2 } from 'lucide-react';
 import { BoardSettings } from '@/lib/types';
+import { downloadBoardExport } from '@/lib/exportImport';
 import ShareLinksModal from './ShareLinksModal';
+import DeleteBoardModal from './DeleteBoardModal';
 
 const CARD_FONT_SCALE_MIN = 75;
 const CARD_FONT_SCALE_MAX = 150;
@@ -38,6 +40,7 @@ export default function BoardSettingsModal({
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const [isSharesOpen, setIsSharesOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -59,26 +62,8 @@ export default function BoardSettingsModal({
     setExportError('');
     setIsExporting(true);
     try {
-      const res = await fetch(`/api/boards/${boardId}/export`, {
-        headers: { Authorization: `Bearer ${sessionToken}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setExportError(data?.error || 'Failed to export board.');
-        return;
-      }
-      const blob = await res.blob();
-      const disposition = res.headers.get('Content-Disposition') || '';
-      const match = disposition.match(/filename="?([^";]+)"?/);
-      const filename = match?.[1] ?? `${boardId}-${new Date().toISOString().slice(0, 10)}.json`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const error = await downloadBoardExport(boardId, sessionToken);
+      if (error) setExportError(error);
     } catch {
       setExportError('A network error occurred. Please try again.');
     } finally {
@@ -255,6 +240,32 @@ export default function BoardSettingsModal({
             </p>
           </div>
 
+          {/* Section: Danger zone */}
+          <div
+            className="rounded-xl p-4 space-y-3"
+            style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)' }}
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="text-[#F87171]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#F87171]">Danger zone</span>
+            </div>
+
+            <p className="text-[11px] text-[#8C7B6E] leading-relaxed">
+              Permanently deletes this campaign board and removes access for every member
+              instantly. This cannot be undone — export a backup first.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setIsDeleteOpen(true)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer"
+              style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#FCA5A5' }}
+            >
+              <Trash2 size={15} />
+              Delete board…
+            </button>
+          </div>
+
           {/* Feedback */}
           {error && (
             <div
@@ -302,6 +313,13 @@ export default function BoardSettingsModal({
       <ShareLinksModal
         isOpen={isSharesOpen}
         onClose={() => setIsSharesOpen(false)}
+        boardId={boardId}
+        sessionToken={sessionToken}
+      />
+
+      <DeleteBoardModal
+        isOpen={isDeleteOpen}
+        onClose={() => setIsDeleteOpen(false)}
         boardId={boardId}
         sessionToken={sessionToken}
       />

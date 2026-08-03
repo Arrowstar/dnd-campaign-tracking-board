@@ -43,3 +43,50 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
   }
 }
+
+/**
+ * Feature 07 — transfer the DM role to another member and leave the board.
+ * The target becomes the sole DM; the caller is removed from the board (they
+ * cannot stay as a player without demoting themselves first — this is the
+ * "leave board" path for DMs). Keeps the invariant that every board has ≥ 1 DM.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ boardId: string; targetUserId: string }> }
+) {
+  try {
+    const user = await getAuthUser(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { boardId, targetUserId } = await params;
+    await ensureSchema();
+    const sql = getSql();
+
+    const rows = await sql`SELECT members FROM boards WHERE id = ${boardId} LIMIT 1`;
+    if (rows.length === 0) return NextResponse.json({ error: 'Board not found.' }, { status: 404 });
+
+    const members = rows[0].members || {};
+    const callerMember = members[user.id];
+    if (!callerMember || callerMember.role !== 'dm') {
+      return NextResponse.json(
+        { error: 'Only a Dungeon Master can transfer the DM role.' },
+        { status: 403 }
+      );
+    }
+    if (targetUserId === user.id) {
+      return NextResponse.json({ error: 'You are already the Dungeon Master.' }, { status: 400 });
+    }
+    if (!members[targetUserId]) {
+      return NextResponse.json({ error: 'Target user is not a member of this board.' }, { status: 404 });
+    }
+
+    members[targetUserId].role = 'dm';
+    delete members[user.id];
+    await sql`UPDATE boards SET members = ${JSON.stringify(members)}::jsonb, updated_at = NOW() WHERE id = ${boardId}`;
+
+    return NextResponse.json({ success: true, message: 'DM role transferred.' });
+  } catch (err) {
+    console.error('Transfer DM error:', err);
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
+  }
+}

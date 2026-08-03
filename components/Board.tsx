@@ -481,6 +481,11 @@ export default function Board({ boardId }: { boardId: string }) {
           window.location.href = '/';
           return null;
         }
+        if (res.status === 404) {
+          alert('This board was deleted by its DM.');
+          window.location.href = '/';
+          return null;
+        }
         return res.json();
       })
       .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; settings?: BoardSettings; updatedAt?: string | null } | null) => {
@@ -563,6 +568,11 @@ export default function Board({ boardId }: { boardId: string }) {
       window.location.href = '/';
     };
 
+    const handleBoardDeleted = () => {
+      alert('This board was deleted by its DM.');
+      window.location.href = '/';
+    };
+
     const handleSessionLost = () => {
       window.location.href = '/';
     };
@@ -578,6 +588,10 @@ export default function Board({ boardId }: { boardId: string }) {
         }
         if (res.status === 403) {
           handleMembershipLost();
+          return false;
+        }
+        if (res.status === 404) {
+          handleBoardDeleted();
           return false;
         }
         if (!res.ok) return false;
@@ -612,6 +626,10 @@ export default function Board({ boardId }: { boardId: string }) {
         }
         if (res.status === 403) {
           handleMembershipLost();
+          return;
+        }
+        if (res.status === 404) {
+          handleBoardDeleted();
           return;
         }
         if (!res.ok) return;
@@ -684,6 +702,13 @@ export default function Board({ boardId }: { boardId: string }) {
             body,
           });
           if (!res.ok) {
+            if (res.status === 404) {
+              // Board deleted by its DM while this user had unsaved edits —
+              // surface it and leave; there is nothing left to save to.
+              alert('This board was deleted by its DM.');
+              window.location.href = '/';
+              return;
+            }
             const detail = await res.text().catch(() => '');
             console.error('Board save failed:', res.status, detail);
             setSaveError(

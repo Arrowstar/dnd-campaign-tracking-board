@@ -31,6 +31,11 @@ export async function ensureSchema(): Promise<void> {
     );
   `;
 
+  // Feature 07 — soft-deleted accounts keep their row (audit trail, comment
+  // authorship stays resolvable) but are renamed + locked out. Login and
+  // register filter on deleted_at IS NULL.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,

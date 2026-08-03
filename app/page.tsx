@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Shield, Swords, Globe, LogOut, Plus, ChevronRight,
-  Loader2, AlertCircle, UserPlus, LogIn, Users, KeyRound, Crown, Upload,
+  Loader2, AlertCircle, UserPlus, LogIn, Users, KeyRound, Crown, Upload, ArrowLeftRight,
 } from 'lucide-react';
 import UserSettingsModal from '@/components/UserSettingsModal';
+import TransferDmModal from '@/components/TransferDmModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ export default function Home() {
 
   // Modals
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [transferBoard, setTransferBoard] = useState<BoardEntry | null>(null);
 
   // Create form
   const [createBoardId, setCreateBoardId] = useState('');
@@ -91,9 +93,8 @@ export default function Home() {
   }, []);
 
   // ── Load boards when session changes ──────────────────────────────────────
-  useEffect(() => {
+  const loadBoards = useCallback(() => {
     if (!session) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoadingBoards(true);
     fetch('/api/auth/my-boards', { headers: { Authorization: `Bearer ${session.sessionToken}` } })
       .then(r => r.json())
@@ -101,6 +102,9 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setIsLoadingBoards(false));
   }, [session]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadBoards(); }, [loadBoards]);
 
   // ── Share-view "Request to join" prefill (?join=<boardId>, Feature 09) ─────
   // From the read-only view page's join CTA: drop straight into the join form
@@ -350,7 +354,12 @@ export default function Home() {
               myBoards
                 .sort((a, b) => new Date(b.joinedAt).getTime() - new Date(a.joinedAt).getTime())
                 .map(b => (
-                  <BoardCard key={b.boardId} board={b} onEnter={() => router.push(`/board/${b.boardId}`)} />
+                  <BoardCard
+                    key={b.boardId}
+                    board={b}
+                    onEnter={() => router.push(`/board/${b.boardId}`)}
+                    onTransfer={b.role === 'dm' ? setTransferBoard : undefined}
+                  />
                 ))
             )}
           </div>
@@ -524,6 +533,22 @@ export default function Home() {
         onClose={() => setShowSettingsModal(false)}
         sessionToken={session.sessionToken}
         username={session.displayName}
+        onAccountDeleted={() => {
+          setShowSettingsModal(false);
+          setMyBoards([]);
+          setSession(null);
+        }}
+      />
+
+      <TransferDmModal
+        isOpen={transferBoard !== null}
+        onClose={() => setTransferBoard(null)}
+        boardId={transferBoard?.boardId ?? ''}
+        sessionToken={session.sessionToken}
+        onTransferred={() => {
+          setTransferBoard(null);
+          loadBoards();
+        }}
       />
 
       <style>{`
@@ -674,28 +699,42 @@ function AuthScreen({
   );
 }
 
-function BoardCard({ board, onEnter }: { board: BoardEntry; onEnter: () => void }) {
+function BoardCard({ board, onEnter, onTransfer }: { board: BoardEntry; onEnter: () => void; onTransfer?: (b: BoardEntry) => void }) {
   const isDM = board.role === 'dm';
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onEnter}
-      className="w-full text-left px-3 py-3 rounded-xl group flex items-center gap-3 transition-all cursor-pointer"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEnter(); } }}
+      className="w-full rounded-xl group flex items-center gap-1 transition-all cursor-pointer"
       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(181,141,61,0.08)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(181,141,61,0.25)'; }}
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.06)'; }}
     >
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isDM ? '' : ''}`} style={{ background: isDM ? 'rgba(181,141,61,0.2)' : 'rgba(99,102,241,0.2)' }}>
-        {isDM ? <Crown size={14} className="text-[#B58D3D]" /> : <Users size={14} className="text-indigo-400" />}
+      <div className="flex-1 min-w-0 flex items-center gap-3 px-3 py-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isDM ? '' : ''}`} style={{ background: isDM ? 'rgba(181,141,61,0.2)' : 'rgba(99,102,241,0.2)' }}>
+          {isDM ? <Crown size={14} className="text-[#B58D3D]" /> : <Users size={14} className="text-indigo-400" />}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[#E0D8D0] text-sm font-bold truncate">{board.boardId}</p>
+          <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDM ? 'text-[#B58D3D]' : 'text-indigo-400'}`}>
+            {isDM ? 'Dungeon Master' : 'Player'}
+          </p>
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[#E0D8D0] text-sm font-bold truncate">{board.boardId}</p>
-        <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDM ? 'text-[#B58D3D]' : 'text-indigo-400'}`}>
-          {isDM ? 'Dungeon Master' : 'Player'}
-        </p>
-      </div>
-      <ChevronRight size={14} className="text-[#8C7B6E] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-    </button>
+      {isDM && onTransfer && (
+        <button
+          type="button"
+          title="Transfer DM role and leave this board"
+          onClick={(e) => { e.stopPropagation(); onTransfer(board); }}
+          className="mr-1 w-8 h-8 rounded-lg flex items-center justify-center text-[#8C7B6E] hover:text-[#B58D3D] hover:bg-[rgba(181,141,61,0.15)] transition-colors cursor-pointer"
+        >
+          <ArrowLeftRight size={13} />
+        </button>
+      )}
+      <ChevronRight size={14} className="text-[#8C7B6E] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mr-2" />
+    </div>
   );
 }
 

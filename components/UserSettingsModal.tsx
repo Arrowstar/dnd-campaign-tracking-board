@@ -1,22 +1,26 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Lock, CheckCircle2, AlertCircle, Loader2, KeyRound } from 'lucide-react';
+import { X, Lock, CheckCircle2, AlertCircle, Loader2, KeyRound, AlertTriangle, Trash2 } from 'lucide-react';
+import DeleteAccountModal from './DeleteAccountModal';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   sessionToken: string;
   username: string;
+  /** Called after the account is deleted — the lobby clears the session. */
+  onAccountDeleted?: () => void;
 }
 
-export default function UserSettingsModal({ isOpen, onClose, sessionToken, username }: UserSettingsModalProps) {
+export default function UserSettingsModal({ isOpen, onClose, sessionToken, username, onAccountDeleted }: UserSettingsModalProps) {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -136,6 +140,28 @@ export default function UserSettingsModal({ isOpen, onClose, sessionToken, usern
             </div>
           )}
 
+          {/* Danger zone */}
+          <div className="pt-2">
+            <div className="mb-3" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={14} className="text-[#F87171]" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#F87171]">Danger zone</span>
+            </div>
+            <p className="text-[11px] text-[#8C7B6E] leading-relaxed mb-2.5">
+              Deletes your account, removes you from every board, and reassigns the items you
+              created to each board&apos;s DM. This cannot be undone.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsDeleteOpen(true)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer"
+              style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#FCA5A5' }}
+            >
+              <Trash2 size={15} />
+              Delete account…
+            </button>
+          </div>
+
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -155,6 +181,17 @@ export default function UserSettingsModal({ isOpen, onClose, sessionToken, usern
             </button>
           </div>
         </form>
+
+        <DeleteAccountModal
+          isOpen={isDeleteOpen}
+          onClose={() => setIsDeleteOpen(false)}
+          sessionToken={sessionToken}
+          username={username}
+          onAccountDeleted={() => {
+            setIsDeleteOpen(false);
+            onAccountDeleted?.();
+          }}
+        />
       </div>
 
       <style>{`
