@@ -8,8 +8,9 @@ import {
   Upload, Link as LinkIcon, Image as ImageIcon,
   ChevronUp, ChevronDown, SlidersHorizontal, Crop as CropIcon,
 } from 'lucide-react';
-import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout, TagDef, BoardSettings } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
+import TagEditor from './TagEditor';
 import NpcBoardItemFields from './NpcBoardItemFields';
 import StructuredBoardItemFields, { FieldDef, parseStructured } from './StructuredBoardItemFields';
 import {
@@ -54,6 +55,12 @@ interface FocusDrawerProps {
   /** Width of the drawer in px */
   width: number;
   onWidthChange: (w: number) => void;
+  /** Board-wide tag definitions (colors) for chip rendering + def creation. */
+  tagDefs?: Record<string, TagDef>;
+  /** Every tag in use across the board + defined defs (autocomplete). */
+  allTagNames?: string[];
+  /** Persist a settings change (DM only) — used to create tag definitions. */
+  onUpdateSettings?: (settings: BoardSettings) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +102,9 @@ export default function FocusDrawer({
   onScrollToItem,
   width,
   onWidthChange,
+  tagDefs,
+  allTagNames,
+  onUpdateSettings,
 }: FocusDrawerProps) {
   const [activeTab, setActiveTab] = useState<'content' | 'comments' | 'preview'>('content');
   const [commentText, setCommentText] = useState('');
@@ -408,6 +418,35 @@ export default function FocusDrawer({
                     isLight={true}
                     className="w-full"
                   />
+                </div>
+              )}
+
+              {/* Tags — light organization tool, shared with the canvas chips,
+                  board-wide filter, and bulk operations (Feature 02). */}
+              {canEdit && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">
+                    Tags
+                  </label>
+                  <TagEditor
+                    tags={item.tags || []}
+                    onChange={newTags => onUpdate({ ...item, tags: newTags })}
+                    suggestions={allTagNames || []}
+                    tagDefs={tagDefs}
+                    canDefineColors={user.role === 'dm'}
+                    onCreateTagDef={
+                      user.role === 'dm' && onUpdateSettings
+                        ? (tag, color) => onUpdateSettings({
+                            tagDefs: { ...(tagDefs || {}), [tag]: { color } },
+                          })
+                        : undefined
+                    }
+                  />
+                  {!user || user.role !== 'dm' ? (
+                    <p className="text-[10px] text-[#8C7B6E]">New tags get the default gray color (the DM can color them).</p>
+                  ) : (
+                    <p className="text-[10px] text-[#8C7B6E]">Tags without a color default to gray. Click a swatch to define a color for the board.</p>
+                  )}
                 </div>
               )}
 

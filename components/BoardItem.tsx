@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, memo } from 'react';
 import { motion } from 'motion/react';
-import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout, PreviewFieldMode } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout, PreviewFieldMode, TagDef } from '@/lib/types';
 import { canViewField } from '@/lib/fieldVisibility';
+import { tagColor } from '@/lib/tags';
 import {
   Trash2, MessageSquare, Lock, Globe, Eye,
   User as UserIcon, Minimize2, Maximize2, ExternalLink, Upload,
@@ -332,7 +333,7 @@ interface BoardItemProps {
   user: User;
   onUpdate: (item: BoardItemType) => void;
   onDelete: (id: string) => void;
-  onClick: (id: string) => void;
+  onClick: (id: string, e: React.MouseEvent) => void;
   isSelected: boolean;
   isFocused?: boolean;
   onDragStart?: () => void;
@@ -350,6 +351,14 @@ interface BoardItemProps {
   fontScale?: number;
   /** Called when user wants to open the focus drawer for this item */
   onOpenFocus?: (id: string) => void;
+  /** Tag click → board-wide tag filter toggle (per Feature 02). */
+  onToggleTagFilter?: (tag: string) => void;
+  /** Board-wide tag definitions (colors). */
+  tagDefs?: Record<string, TagDef>;
+  /** Tags currently active in the board-wide filter. */
+  activeTagFilter?: string[];
+  /** True when the card is filtered out (dimmed, not hidden). */
+  dimmed?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -731,6 +740,70 @@ function BoardItemTypeIcon({ type, size, className }: { type: BoardItemType['typ
 // BoardItem
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** #tag pills on a card. Chip click toggles the board-wide tag filter; chips
+ *  are buttons with data-no-drag + pointer-stop so they never drag or pan. */
+function TagChips({
+  tags,
+  tagDefs,
+  activeTags = [],
+  onToggle,
+  fontPx,
+  padPx = 1,
+  maxChips = 4,
+  moreColor = '#6B7280',
+}: {
+  tags?: string[];
+  tagDefs?: Record<string, TagDef>;
+  activeTags?: string[];
+  onToggle?: (tag: string) => void;
+  fontPx: number;
+  padPx?: number;
+  maxChips?: number;
+  moreColor?: string;
+}) {
+  const list = (tags || []).filter(Boolean);
+  if (list.length === 0) return null;
+  const visible = list.slice(0, maxChips);
+  const extra = list.length - visible.length;
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0 flex-wrap">
+      {visible.map((tag) => {
+        const color = tagColor(tag, tagDefs) ?? '#8C7B6E';
+        const light = isLightColor(color);
+        const active = activeTags.includes(tag);
+        return (
+          <button
+            key={tag}
+            type="button"
+            data-no-drag
+            onPointerDown={(e) => { e.stopPropagation(); }}
+            onPointerDownCapture={(e) => { e.stopPropagation(); }}
+            onClick={(e) => { e.stopPropagation(); onToggle?.(tag); }}
+            title={`${active ? 'Stop filtering by' : 'Filter by'} #${tag}`}
+            className="cursor-pointer select-none"
+            style={{
+              fontSize: fontPx,
+              lineHeight: 1.2,
+              padding: `${1.5 * padPx}px ${5 * padPx}px`,
+              borderRadius: 999,
+              backgroundColor: color,
+              color: light ? '#1F2937' : '#FFFFFF',
+              boxShadow: active
+                ? `0 0 0 1.5px ${light ? '#1F2937' : '#FFFFFF'}, 0 0 0 3px #B58D3D`
+                : 'inset 0 0 0 1px rgba(0,0,0,0.15)',
+            }}
+          >
+            #{tag}
+          </button>
+        );
+      })}
+      {extra > 0 && (
+        <span className="font-bold" style={{ fontSize: fontPx, color: moreColor }}>+{extra}</span>
+      )}
+    </div>
+  );
+}
+
 export default memo(function BoardItem({
   item,
   user,
@@ -750,6 +823,10 @@ export default memo(function BoardItem({
   lodThresholds,
   fontScale = 1,
   onOpenFocus,
+  onToggleTagFilter,
+  tagDefs,
+  activeTagFilter = [],
+  dimmed,
 }: BoardItemProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef(onReportDimensions);
@@ -923,6 +1000,8 @@ export default memo(function BoardItem({
 
   const handleItemPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (!canEdit) return;
+    // Modifier-clicks select/deselect (multi-select), never drag.
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA' ||
       target.closest('input, button, textarea, a, select, [data-no-drag]')) return;
@@ -1100,10 +1179,12 @@ export default memo(function BoardItem({
           : isSelected
           ? '0 0 0 2px #B58D3D, 0 8px 32px rgba(0,0,0,0.15)'
           : '0 4px 16px rgba(0,0,0,0.12)',
+        opacity: dimmed ? 0.25 : undefined,
+        transition: dimmed ? 'opacity 0.15s ease' : undefined,
       }}
       className={`${renderPinCard ? '' : 'flex flex-col'} nodrag transition-shadow duration-200`}
       data-item-root
-      onClick={() => onClick(item.id)}
+      onClick={(e) => onClick(item.id, e)}
       onDragOver={(e) => {
         if (!canAcceptImageDrop) return;
         e.preventDefault();
@@ -1218,6 +1299,16 @@ export default memo(function BoardItem({
             >
               {item.type}
             </span>
+            <TagChips
+              tags={item.tags}
+              tagDefs={tagDefs}
+              activeTags={activeTagFilter}
+              onToggle={onToggleTagFilter}
+              fontPx={compactCaptionFontSize}
+              padPx={1 / safeZoomScale}
+              maxChips={2}
+              moreColor="#E5E7EB"
+            />
           </div>
           {isDraggingOver && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none z-20"
@@ -1316,6 +1407,29 @@ export default memo(function BoardItem({
           </div>
         )}
       </div>
+
+      {/* ── Tag chips (also on minimized cards) ── */}
+      {(item.tags || []).length > 0 && (
+        <div
+          className="px-2 pt-1 pb-1 flex items-center gap-1 flex-shrink-0"
+          style={{
+            borderBottom: item.minimized ? 'none' : isLight ? '1px solid rgba(0,0,0,0.1)' : `1px solid ${itemColor}30`,
+            backgroundColor: isLight ? 'rgba(0,0,0,0.02)' : `${itemColor}08`,
+          }}
+          onPointerDown={(e) => { e.stopPropagation(); }}
+          onPointerDownCapture={(e) => { e.stopPropagation(); }}
+        >
+          <TagChips
+            tags={item.tags}
+            tagDefs={tagDefs}
+            activeTags={activeTagFilter}
+            onToggle={onToggleTagFilter}
+            fontPx={fontScalePx(9)}
+            maxChips={4}
+            moreColor={isLight ? '#6B7280' : '#D1D5DB'}
+          />
+        </div>
+      )}
 
       {/* ── Preview Body — hidden when minimized ── */}
       {!item.minimized && (

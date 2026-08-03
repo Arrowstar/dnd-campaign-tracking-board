@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { BoardItem as BoardItemType, Connection, User, BoardTab, BoardAnnotation, AnnotationFontStyle, BoardSettings } from '@/lib/types';
 import BoardItem, { ITEM_FIELD_DEFS } from './BoardItem';
+import TagEditor from './TagEditor';
 import Toolbar, { ARROW_COLOR_PRESETS, ARROW_LINE_STYLES, ARROW_LINE_WIDTHS } from './Toolbar';
 import TabBar, { TAB_COLOR_PRESETS } from './TabBar';
 import ItemSidebar from './ItemSidebar';
@@ -13,9 +14,10 @@ import { getResolvedControlPoints } from '@/lib/annotationUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
-import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles } from '@/lib/crossref';
+import { allTagNames, tagColor, isLightColor } from '@/lib/tags';
 import UploadProgress from './UploadProgress';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
@@ -222,6 +224,48 @@ export default function Board({ boardId }: { boardId: string }) {
   // Annotation selection lifted from AnnotationCanvas so keyboard shortcuts can
   // act on annotations too. Selecting one clears item selection (and vice versa).
   const [selectedAnnId, setSelectedAnnId] = useState<string | null>(null);
+
+  // ── Feature 02 — tags ──────────────────────────────────────────────────────
+  // Board-wide tag filter: per-user, tab-independent (persists across tab
+  // switches), applied to allBoardItems before the item render path. Dimming
+  // (not hiding) is the default — canvas position is the spatial metaphor.
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [hideNonMatching, setHideNonMatching] = useState(false);
+  // Multi-select (Ctrl/⌘/Shift-click). Keyboard single-select keeps
+  // `selectedItemId`; the Set is the render source of truth for the gold ring.
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // Feature 02 — tags: definitions, autocomplete vocabulary, and filter math.
+  const tagDefs = boardSettings.tagDefs;
+  const allTagsInUse = useMemo(() => allTagNames(allBoardItems, tagDefs), [allBoardItems, tagDefs]);
+  const tagMatchCount =
+    tagFilter.length === 0
+      ? 0
+      : allBoardItems.filter(i => (i.tags || []).some(t => tagFilter.includes(t))).length;
+  // Items on the active tab the current user may bulk-edit (mirrors the server
+  // merge semantics: DM edits everything, others only their own items).
+  const editableSelectedItems =
+    selectedItemIds.size === 0 || !user
+      ? []
+      : items.filter(i =>
+          selectedItemIds.has(i.id) && (user.role === 'dm' || i.ownerId === user.id)
+        );
+  // Union of tags across the selected editable items (bulk Tag editor input).
+  const bulkUnionTags = (() => {
+    const union = new Set<string>();
+    for (const i of editableSelectedItems) for (const t of i.tags || []) union.add(t);
+    return [...union];
+  })();
+
+  /** Clears item selection (single + multi) and bulk-bar transient state. */
+  const clearItemSelection = useCallback(() => {
+    setSelectedItemId(null);
+    setSelectedItemIds(new Set());
+    setBulkTagOpen(false);
+    setConfirmBulkDelete(false);
+  }, []);
   
   // Transform state ref & zoom percentage display
   const boardContainerRef = useRef<HTMLDivElement>(null);
@@ -652,11 +696,11 @@ export default function Board({ boardId }: { boardId: string }) {
     setTabs(entry.before.tabs);
     setActiveTabId(entry.before.activeTabId);
     persistBoardState(entry.before.tabs);
-    setSelectedItemId(null);
+    clearItemSelection();
     setFocusedItemId(prev =>
       prev && entry.before.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
     );
-  }, [persistBoardState]);
+  }, [persistBoardState, clearItemSelection]);
 
   const handleRedo = useCallback(() => {
     const entry = redoStackRef.current.pop();
@@ -665,11 +709,11 @@ export default function Board({ boardId }: { boardId: string }) {
     setTabs(entry.after.tabs);
     setActiveTabId(entry.after.activeTabId);
     persistBoardState(entry.after.tabs);
-    setSelectedItemId(null);
+    clearItemSelection();
     setFocusedItemId(prev =>
       prev && entry.after.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
     );
-  }, [persistBoardState]);
+  }, [persistBoardState, clearItemSelection]);
 
   const saveState = useCallback(
     (newItems: BoardItemType[], newConns: Connection[], newAnnotations?: BoardAnnotation[], historyKey?: string) => {
@@ -1152,7 +1196,7 @@ export default function Board({ boardId }: { boardId: string }) {
     saveState(newItems, newConns, annChanged ? newAnns : undefined, `del-item:${id}`);
   }, [items, user, connections, activeTab.annotations, dragOffsets, itemDimensions, saveState]);
 
-  const handleItemClick = useCallback((id: string) => {
+  const handleItemClick = useCallback((id: string, e?: React.MouseEvent) => {
     if (isAddingConnection) {
       if (!connectionStart) {
         setConnectionStart(id);
@@ -1177,8 +1221,96 @@ export default function Board({ boardId }: { boardId: string }) {
     // (Delete, Enter, arrows) operate on the selection. Open focus via
     // double-click, the ExternalLink button, or pressing Enter.
     setSelectedAnnId(null);
-    setSelectedItemId(id);
-  }, [isAddingConnection, connectionStart, connectionColor, connectionStyle, connectionWidth, items, connections, saveState]);
+    const multi = !!(e && (e.ctrlKey || e.metaKey || e.shiftKey));
+    if (multi) {
+      // Ctrl/⌘/Shift-click toggles membership in the multi-selection.
+      const next = new Set(selectedItemIds);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      setSelectedItemIds(next);
+      // Keep keyboard single-select in sync: the sole element when 1 selected.
+      setSelectedItemId(next.size === 1 ? id : null);
+      setConfirmBulkDelete(false);
+    } else {
+      setSelectedItemIds(new Set([id]));
+      setSelectedItemId(id);
+    }
+  }, [isAddingConnection, connectionStart, connectionColor, connectionStyle, connectionWidth, items, connections, saveState, selectedItemIds]);
+
+  const handleToggleTagFilter = useCallback((tag: string) => {
+    setTagFilter(prev => (prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]));
+    setConfirmBulkDelete(false);
+  }, []);
+
+  const handleClearTagFilter = useCallback(() => {
+    setTagFilter([]);
+    setHideNonMatching(false);
+    setConfirmBulkDelete(false);
+  }, []);
+
+  /** Persist a DM settings change (tag definitions). Players never reach this. */
+  const handleUpdateSettings = useCallback((next: BoardSettings) => {
+    setBoardSettings(next);
+    if (!user?.sessionToken) return;
+    fetch(`/api/boards/${boardId}/state`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${user.sessionToken}`,
+      },
+      body: JSON.stringify({ settings: { tagDefs: next.tagDefs } }),
+    }).catch(err => console.error('Error saving tag definitions:', err));
+  }, [boardId, user?.sessionToken]);
+
+  // Bulk actions (Feature 02): applied only to items the user may edit —
+  // the server merge would silently drop the rest anyway. One saveState call
+  // so undo/redo restores the whole operation.
+  const handleBulkTagsChange = useCallback((newTags: string[]) => {
+    if (editableSelectedItems.length === 0) return;
+    const editableIds = new Set(editableSelectedItems.map(i => i.id));
+    const newItems = items.map(i => {
+      if (!editableIds.has(i.id)) return i;
+      const merged = (i.tags || []).filter(t => newTags.includes(t));
+      for (const t of newTags) if (!merged.includes(t)) merged.push(t);
+      return { ...i, tags: merged.slice(0, 8) };
+    });
+    saveState(newItems, connections, undefined, 'bulk-tags');
+    setBulkTagOpen(false);
+    setConfirmBulkDelete(false);
+  }, [items, connections, editableSelectedItems, saveState]);
+
+  const handleBulkDelete = useCallback(() => {
+    if (editableSelectedItems.length === 0) return;
+    if (!confirmBulkDelete) {
+      setConfirmBulkDelete(true);
+      return;
+    }
+    const ids = new Set(editableSelectedItems.map(i => i.id));
+    const newItems = items.filter(i => !ids.has(i.id));
+    const newConns = connections.filter(c => !ids.has(c.fromId) && !ids.has(c.toId));
+    // Mirror handleDeleteItem: null out annotation pins pointing at deleted items.
+    const currentAnns = activeTab.annotations || [];
+    let annChanged = false;
+    const newAnns = currentAnns.map(ann => {
+      if (!ann.pins || !ann.pins.some(p => p?.itemId && ids.has(p.itemId))) return ann;
+      annChanged = true;
+      const geom = getResolvedControlPoints(ann, items, dragOffsets, itemDimensions);
+      const updatedPins = ann.pins.map(p => (p?.itemId && ids.has(p.itemId) ? null : p));
+      const hasRemainingPins = updatedPins.some(Boolean);
+      return {
+        ...ann,
+        x: geom.x1 ?? geom.x ?? ann.x,
+        y: geom.y1 ?? geom.y ?? ann.y,
+        x2: geom.x2 ?? ann.x2,
+        y2: geom.y2 ?? ann.y2,
+        width: geom.width ?? ann.width,
+        height: geom.height ?? ann.height,
+        pins: hasRemainingPins ? updatedPins : undefined,
+      };
+    });
+    saveState(newItems, newConns, annChanged ? newAnns : undefined, 'bulk-delete');
+    clearItemSelection();
+    setFocusedItemId(prev => (prev && ids.has(prev) ? null : prev));
+  }, [items, connections, activeTab.annotations, editableSelectedItems, confirmBulkDelete, dragOffsets, itemDimensions, saveState, clearItemSelection]);
 
   const handleOpenFocus = useCallback((id: string) => {
     setFocusedItemId(id);
@@ -1194,8 +1326,8 @@ export default function Board({ boardId }: { boardId: string }) {
   // so keyboard shortcuts always act on the most recently selected object.
   const handleSelectAnnotation = useCallback((id: string | null) => {
     setSelectedAnnId(id);
-    if (id) setSelectedItemId(null);
-  }, []);
+    if (id) clearItemSelection();
+  }, [clearItemSelection]);
 
   // ── Global keyboard shortcuts ───────────────────────────────────────────────
   // Operate on the selected board item (click a card to select it). Keys are
@@ -1256,18 +1388,22 @@ export default function Board({ boardId }: { boardId: string }) {
             e.preventDefault();
             handleDeleteAnnotation(selectedAnnId);
             setSelectedAnnId(null);
+          } else if (selectedItemIds.size > 1) {
+            // Multi-selection: delete all selected (first press confirms).
+            e.preventDefault();
+            handleBulkDelete();
           } else if (selectedItemId) {
             e.preventDefault();
             // If the deleted item is the one open in the focus drawer, close the
             // drawer too — otherwise FocusDrawer renders with a null item.
             if (focusedItemId === selectedItemId) setFocusedItemId(null);
             handleDeleteItem(selectedItemId);
-            setSelectedItemId(null);
+            clearItemSelection();
           }
           break;
         case 'Escape':
           setSelectedAnnId(null);
-          setSelectedItemId(null);
+          clearItemSelection();
           setIsAddingConnection(false);
           setConnectionStart(null);
           setActiveTool(null);
@@ -1460,6 +1596,9 @@ export default function Board({ boardId }: { boardId: string }) {
             },
           }));
           setSelectedItemId(null);
+          setSelectedItemIds(new Set());
+          setBulkTagOpen(false);
+          setConfirmBulkDelete(false);
           setActiveTabId(tabId);
           // Apply the tab's stored view — its precomputed fit on first view,
           // its last view/zoom/pan on revisits. Never recomputes a fit here.
@@ -1590,7 +1729,7 @@ export default function Board({ boardId }: { boardId: string }) {
                 <div ref={boardContainerRef} className="w-[4000px] h-[4000px] relative" onClick={(e) => {
                   const target = e.target as HTMLElement;
                   if (target.closest('[data-item-root]')) return;
-                  setSelectedItemId(null);
+                  clearItemSelection();
                   setSelectedAnnId(null);
                 }}>
                   {/* Infinite Grid Background */}
@@ -1981,6 +2120,13 @@ export default function Board({ boardId }: { boardId: string }) {
                     if (item.visibility === 'dm' && user.role !== 'dm' && item.ownerId !== user.id) return null;
                     if (item.visibility === 'owner' && item.ownerId !== user.id) return null;
 
+                    // Feature 02: board-wide tag filter (OR semantics). Dimmed
+                    // cards stay in the DOM (pointer-events preserved); hide
+                    // mode removes them entirely.
+                    const isFilteredOut =
+                      tagFilter.length > 0 && !(item.tags || []).some(t => tagFilter.includes(t));
+                    if (isFilteredOut && hideNonMatching) return null;
+
                     return (
                       <BoardItem 
                         key={item.id} 
@@ -1989,7 +2135,7 @@ export default function Board({ boardId }: { boardId: string }) {
                         onUpdate={handleUpdateItem}
                         onDelete={handleDeleteItem}
                         onClick={handleItemClick}
-                        isSelected={connectionStart === item.id || selectedItemId === item.id}
+                        isSelected={connectionStart === item.id || selectedItemIds.has(item.id) || selectedItemId === item.id}
                         isFocused={focusedItemId === item.id}
                         onDragStart={handleDragStartItem}
                         onDragMove={handleDragMove}
@@ -2002,6 +2148,10 @@ export default function Board({ boardId }: { boardId: string }) {
                         lodThresholds={BOARD_ITEM_LOD_THRESHOLDS}
                         fontScale={boardSettings.cardFontScale ?? 1}
                         onOpenFocus={handleOpenFocus}
+                        onToggleTagFilter={handleToggleTagFilter}
+                        tagDefs={tagDefs}
+                        activeTagFilter={tagFilter}
+                        dimmed={isFilteredOut}
                       />
                     );
                   })}
@@ -2038,6 +2188,125 @@ export default function Board({ boardId }: { boardId: string }) {
             );
           }}
         </TransformWrapper>
+
+          {/* ── Feature 02: tag filter pill row (top-center, below toolbar) ── */}
+          {tagFilter.length > 0 && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-[85%]">
+              <div className="flex items-center gap-1.5 bg-[#2C2824]/95 backdrop-blur-sm border border-[#B58D3D] rounded-full px-3 py-1.5 shadow-2xl flex-wrap justify-center">
+                {tagFilter.map(tag => {
+                  const color = tagColor(tag, tagDefs) ?? '#8C7B6E';
+                  const light = isLightColor(color);
+                  return (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
+                      style={{ backgroundColor: color, color: light ? '#1F2937' : '#FFFFFF' }}
+                    >
+                      #{tag}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTagFilter(tag)}
+                        className="cursor-pointer opacity-70 hover:opacity-100 transition-opacity"
+                        title={`Stop filtering by #${tag}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  );
+                })}
+                <span className="text-[10px] text-[#E0D8D0] whitespace-nowrap">
+                  showing {tagMatchCount} of {allBoardItems.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setHideNonMatching(v => !v)}
+                  className={`text-[10px] font-bold rounded-full px-2 py-0.5 transition-colors cursor-pointer whitespace-nowrap ${
+                    hideNonMatching ? 'bg-[#B58D3D] text-[#1C1814]' : 'text-[#E0D8D0] hover:bg-white/10'
+                  }`}
+                  title="Toggle hiding non-matching cards (default dims them)"
+                >
+                  {hideNonMatching ? 'Hiding non-matching' : 'Dim non-matching'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearTagFilter}
+                  className="flex items-center gap-0.5 text-[10px] font-bold text-[#B58D3D] hover:text-[#F5E9C8] cursor-pointer whitespace-nowrap"
+                >
+                  <X size={10} /> Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Feature 02: bulk bar (multi-select actions, bottom-center) ── */}
+          {selectedItemIds.size > 0 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
+              <div className="flex items-center gap-2 bg-[#2C2824]/95 backdrop-blur-sm border border-[#B58D3D] rounded-full px-4 py-2 shadow-2xl">
+                <span className="text-xs font-bold text-[#E0D8D0] whitespace-nowrap">
+                  {selectedItemIds.size} selected
+                </span>
+                {editableSelectedItems.length < selectedItemIds.size && (
+                  <span className="text-[10px] text-[#8C7B6E] whitespace-nowrap">
+                    ({editableSelectedItems.length} can be edited)
+                  </span>
+                )}
+                <div className="h-4 w-px bg-[#B58D3D]/40 my-auto" />
+                <button
+                  type="button"
+                  onClick={() => setBulkTagOpen(v => !v)}
+                  disabled={editableSelectedItems.length === 0}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold text-[#E0D8D0] hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                  title="Tag all selected (editable) cards"
+                >
+                  <TagIcon size={12} className="text-[#B58D3D]" />
+                  Tag…
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={editableSelectedItems.length === 0}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
+                    confirmBulkDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-[#E0D8D0] hover:bg-white/10 hover:text-red-400'
+                  }`}
+                  title="Delete all selected (editable) cards — press again to confirm"
+                >
+                  <Trash2 size={12} className={confirmBulkDelete ? '' : 'text-red-400'} />
+                  {confirmBulkDelete ? `Delete ${editableSelectedItems.length}?` : 'Delete'}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearItemSelection}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold text-[#8C7B6E] hover:text-[#E0D8D0] hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X size={12} /> Clear
+                </button>
+              </div>
+
+              {/* Bulk Tag popover — same tag editor as the focus drawer */}
+              {bulkTagOpen && (
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-80 bg-[#2C2824]/98 backdrop-blur-sm border border-[#B58D3D] rounded-xl p-3 shadow-2xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] mb-1.5">
+                    Tag {editableSelectedItems.length} selected card{editableSelectedItems.length === 1 ? '' : 's'}
+                  </div>
+                  <TagEditor
+                    tags={bulkUnionTags}
+                    onChange={handleBulkTagsChange}
+                    suggestions={allTagsInUse}
+                    tagDefs={tagDefs}
+                    canDefineColors={user.role === 'dm'}
+                    onCreateTagDef={
+                      user.role === 'dm'
+                        ? (tag, color) => handleUpdateSettings({ tagDefs: { ...(tagDefs || {}), [tag]: { color } } })
+                        : undefined
+                    }
+                  />
+                  <p className="text-[10px] text-[#8C7B6E] mt-1.5">
+                    Removing a chip removes that tag from every selected card you can edit.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>{/* end canvas drag-drop wrapper */}
 
 
@@ -2060,6 +2329,9 @@ export default function Board({ boardId }: { boardId: string }) {
               members={boardMembers}
               width={drawerWidth}
               onWidthChange={setDrawerWidth}
+              tagDefs={tagDefs}
+              allTagNames={allTagsInUse}
+              onUpdateSettings={handleUpdateSettings}
             />
           );
         })()}
@@ -2103,6 +2375,7 @@ export default function Board({ boardId }: { boardId: string }) {
                 sessionToken={user.sessionToken}
                 settings={boardSettings}
                 onPreviewChange={setBoardSettings}
+                allTagNames={allTagsInUse}
               />
             )}
           </>

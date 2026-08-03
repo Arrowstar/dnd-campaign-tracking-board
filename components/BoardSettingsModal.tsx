@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid } from 'lucide-react';
-import { BoardSettings } from '@/lib/types';
+import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Tag as TagIcon, Plus } from 'lucide-react';
+import { BoardSettings, TagDef } from '@/lib/types';
+import { TAG_COLOR_PRESETS, normalizeTag, isLightColor } from '@/lib/tags';
 
 const CARD_FONT_SCALE_MIN = 75;
 const CARD_FONT_SCALE_MAX = 150;
@@ -17,6 +18,8 @@ interface BoardSettingsModalProps {
   settings: BoardSettings;
   /** Live-apply a draft so the canvas behind the modal updates immediately. */
   onPreviewChange: (settings: BoardSettings) => void;
+  /** Every tag in use across the board (autocomplete for new definitions). */
+  allTagNames?: string[];
 }
 
 export default function BoardSettingsModal({
@@ -26,6 +29,7 @@ export default function BoardSettingsModal({
   sessionToken,
   settings,
   onPreviewChange,
+  allTagNames = [],
 }: BoardSettingsModalProps) {
   // Persisted settings as of opening the modal — the baseline to revert the
   // canvas to if the user cancels. The component mounts fresh on every open.
@@ -34,6 +38,7 @@ export default function BoardSettingsModal({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
 
   if (!isOpen) return null;
 
@@ -76,6 +81,22 @@ export default function BoardSettingsModal({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const tagDefs = draft.tagDefs || {};
+  const setTagDefs = (next: Record<string, TagDef>) => updateDraft({ ...draft, tagDefs: next });
+  const addTagDef = (raw: string) => {
+    const t = normalizeTag(raw);
+    if (!t) return;
+    setTagDefs({ ...tagDefs, [t]: tagDefs[t] ?? {} });
+    setNewTagName('');
+  };
+  const setTagDefColor = (tag: string, color: string) =>
+    setTagDefs({ ...tagDefs, [tag]: { color } });
+  const removeTagDef = (tag: string) => {
+    const next = { ...tagDefs };
+    delete next[tag];
+    setTagDefs(next);
   };
 
   return (
@@ -156,6 +177,95 @@ export default function BoardSettingsModal({
                 <RotateCcw size={12} />
                 Reset to 100%
               </button>
+            </div>
+          </div>
+
+          {/* Section: Tag colors */}
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <TagIcon size={15} className="text-[#B58D3D]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#B58D3D]">Tag colors</span>
+              <span className="text-[10px] text-[#8C7B6E]">Colors for #tags on cards — decoration only, tags still work without one</span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {Object.entries(tagDefs).length === 0 && (
+                <p className="text-[11px] text-[#8C7B6E] leading-relaxed">
+                  No tag colors defined yet. Add a tag below, then pick a swatch. Cards can also
+                  define colors when a tag is added in the focus panel.
+                </p>
+              )}
+              {Object.entries(tagDefs).map(([tag, def]) => {
+                const color = def.color ?? '#8C7B6E';
+                const light = isLightColor(color);
+                return (
+                  <div key={tag} className="rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(181,141,61,0.15)' }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span
+                        className="text-[11px] font-bold rounded-full px-2 py-0.5"
+                        style={{ backgroundColor: color, color: light ? '#1F2937' : '#FFFFFF' }}
+                      >
+                        #{tag}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeTagDef(tag)}
+                        className="flex items-center gap-1 text-[10px] text-[#8C7B6E] hover:text-red-400 transition-colors cursor-pointer"
+                        title="Remove color definition (tags stay on cards)"
+                      >
+                        <X size={11} /> Remove
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {TAG_COLOR_PRESETS.map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setTagDefColor(tag, preset)}
+                          className="w-5 h-5 rounded-full cursor-pointer transition-transform hover:scale-110"
+                          style={{
+                            backgroundColor: preset,
+                            boxShadow: def.color === preset
+                              ? '0 0 0 2px #B58D3D, 0 0 0 4px rgba(181,141,61,0.3)'
+                              : 'inset 0 0 0 1px rgba(0,0,0,0.25)',
+                          }}
+                          title={`Color ${preset}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="flex items-center gap-1.5">
+                <input
+                  list="board-settings-tag-defs"
+                  value={newTagName}
+                  onChange={e => setNewTagName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTagDef(newTagName);
+                    }
+                  }}
+                  placeholder="Tag name (e.g. villains)"
+                  className="flex-1 min-w-0 border border-[#D9D0C1] bg-white/10 rounded px-2.5 py-1.5 text-xs text-[#E0D8D0] placeholder-[#8C7B6E] outline-none focus:border-[#B58D3D] transition-colors"
+                />
+                <datalist id="board-settings-tag-defs">
+                  {allTagNames.filter(n => !(n in tagDefs)).map(n => <option key={n} value={n} />)}
+                </datalist>
+                <button
+                  type="button"
+                  onClick={() => addTagDef(newTagName)}
+                  disabled={!normalizeTag(newTagName)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#B58D3D]/15 text-[#B58D3D] hover:bg-[#B58D3D]/25 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                >
+                  <Plus size={12} /> Add
+                </button>
+              </div>
+              <p className="text-[10px] text-[#8C7B6E]">
+                Removing a definition never removes the tag from cards — it just falls back to gray.
+              </p>
             </div>
           </div>
 

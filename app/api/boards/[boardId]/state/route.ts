@@ -3,6 +3,7 @@ import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth';
 import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
 import { syncLinkTitles } from '@/lib/crossref';
+import { mergeTagDefs } from '@/lib/tags';
 
 export const runtime = 'nodejs';
 
@@ -89,7 +90,15 @@ export async function POST(
     if (settings && member.role === 'dm') {
       const storedRows = await sql`SELECT settings FROM boards WHERE id = ${boardId} LIMIT 1`;
       const storedSettings: Record<string, unknown> = storedRows[0]?.settings ?? {};
-      const mergedSettings = { ...storedSettings, ...settings };
+      // tagDefs must merge per-key, else one client's defs wipe another's.
+      const mergedSettings = {
+        ...storedSettings,
+        ...settings,
+        tagDefs: mergeTagDefs(
+          (storedSettings.tagDefs as Record<string, { color?: string }> | undefined) ?? {},
+          (settings.tagDefs as Record<string, { color?: string }> | undefined) ?? {}
+        ),
+      };
       const updated = await sql`
         UPDATE boards SET settings = ${JSON.stringify(mergedSettings)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
         RETURNING updated_at

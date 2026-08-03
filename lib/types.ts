@@ -186,9 +186,16 @@ export type BoardTab = {
  * the boards.settings JSONB column. Fields are optional so new settings can
  * be added without migrating existing rows.
  */
+/** Optional per-tag decoration (color etc.) stored in board settings. A tag with no def still works (default gray). */
+export type TagDef = {
+  color?: string;
+};
+
 export type BoardSettings = {
   /** Multiplier applied to every piece of text on canvas board-item cards (1 = 100%). */
   cardFontScale?: number;
+  /** Tag color definitions, keyed by normalized tag name. DM-owned decoration only. */
+  tagDefs?: Record<string, TagDef>;
 };
 
 export type BoardState = {
