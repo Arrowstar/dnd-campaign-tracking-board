@@ -52,7 +52,8 @@ export default function MentionAutocomplete({
 
   return (
     <div
-      className="min-w-[200px] max-w-[260px] max-h-56 overflow-y-auto rounded-lg bg-[#2C2824] border border-[#B58D3D]/50 shadow-2xl py-1"
+      data-mention-autocomplete
+      className="z-50 min-w-[200px] max-w-[260px] max-h-56 overflow-y-auto rounded-lg bg-[#2C2824] border border-[#B58D3D]/50 shadow-2xl py-1"
       onPointerDown={e => e.stopPropagation()}
       onMouseDown={e => e.preventDefault()}
     >
