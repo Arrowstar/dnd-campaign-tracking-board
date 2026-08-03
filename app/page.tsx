@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Shield, Swords, Globe, LogOut, Plus, ChevronRight,
-  Loader2, AlertCircle, UserPlus, LogIn, Users, KeyRound, Crown,
+  Loader2, AlertCircle, UserPlus, LogIn, Users, KeyRound, Crown, Upload,
 } from 'lucide-react';
 import UserSettingsModal from '@/components/UserSettingsModal';
 
@@ -40,7 +40,7 @@ export default function Home() {
   // Lobby
   const [myBoards, setMyBoards] = useState<BoardEntry[]>([]);
   const [isLoadingBoards, setIsLoadingBoards] = useState(false);
-  const [lobbyView, setLobbyView] = useState<'boards' | 'join' | 'create'>('boards');
+  const [lobbyView, setLobbyView] = useState<'boards' | 'join' | 'create' | 'import'>('boards');
 
   // Join form
   const [joinBoardId, setJoinBoardId] = useState('');
@@ -56,6 +56,13 @@ export default function Home() {
   const [createBoardPassword, setCreateBoardPassword] = useState('');
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+
+  // Import form
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importBoardId, setImportBoardId] = useState('');
+  const [importBoardPassword, setImportBoardPassword] = useState('');
+  const [importError, setImportError] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
 
   // ── Session check on mount ─────────────────────────────────────────────────
   useEffect(() => {
@@ -167,6 +174,63 @@ export default function Home() {
       setCreateError('Network error. Please try again.');
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // ── Import board from JSON ────────────────────────────────────────────────
+  const handleImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!session) return;
+    if (!importFile) { setImportError('Choose a board export (.json) file first.'); return; }
+    setImportError('');
+    setIsImporting(true);
+    try {
+      const text = await importFile.text();
+      let parsed: { app?: string; schemaVersion?: number; board?: { id?: string } } = {};
+      try { parsed = JSON.parse(text); } catch { setImportError('That file is not valid JSON.'); return; }
+
+      if (parsed.app !== 'mythos-canvas') {
+        setImportError('That file is not a Mythos Canvas board export.');
+        return;
+      }
+      if (parsed.schemaVersion !== 1) {
+        setImportError(
+          parsed.schemaVersion && parsed.schemaVersion > 1
+            ? 'This file was exported by a newer version of Mythos Canvas. Please update the app and try again.'
+            : 'That export file has an unsupported version.'
+        );
+        return;
+      }
+
+      const sourceBoardId = typeof parsed.board?.id === 'string' ? parsed.board.id : 'import';
+      const res = await fetch(`/api/boards/${sourceBoardId}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.sessionToken}` },
+        body: JSON.stringify({
+          ...parsed,
+          newBoardId: importBoardId.trim().toLowerCase() || undefined,
+          boardPassword: importBoardPassword || undefined,
+        }),
+      });
+
+      const responseText = await res.text();
+      let data: { error?: string; boardId?: string } | null = null;
+      try { data = JSON.parse(responseText); } catch { /* platform error (e.g. oversized body) */ }
+
+      if (!res.ok) {
+        if (res.status === 413 || !data) {
+          setImportError('Import file is too large. Maximum size is 10 MB.');
+          return;
+        }
+        setImportError(data.error || 'Failed to import board.');
+        return;
+      }
+
+      router.push(`/board/${data?.boardId}`);
+    } catch {
+      setImportError('Network error. Please try again.');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -291,6 +355,13 @@ export default function Home() {
             >
               <Plus size={15} />Create a Campaign
             </button>
+            <button
+              onClick={() => setLobbyView('import')}
+              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${lobbyView === 'import' ? 'text-[#B58D3D]' : 'text-[#A89F91] hover:text-[#E0D8D0]'}`}
+              style={{ background: lobbyView === 'import' ? 'rgba(181,141,61,0.12)' : 'transparent', border: '1px solid ' + (lobbyView === 'import' ? 'rgba(181,141,61,0.3)' : 'transparent') }}
+            >
+              <Upload size={15} />Import from JSON
+            </button>
           </div>
         </aside>
 
@@ -375,6 +446,57 @@ export default function Home() {
                 {createError && <ErrorBox>{createError}</ErrorBox>}
 
                 <SubmitButton isLoading={isCreating} label="Create Campaign" loadingLabel="Creating..." />
+                <button
+                  type="button"
+                  onClick={() => setLobbyView('import')}
+                  className="w-full text-center text-xs text-[#8C7B6E] hover:text-[#B58D3D] transition-colors cursor-pointer"
+                >
+                  Or import a board from a JSON export
+                </button>
+              </form>
+            </FormCard>
+          )}
+
+          {lobbyView === 'import' && (
+            <FormCard title="Import a Campaign" icon={<Upload size={20} className="text-[#B58D3D]" />}>
+              <form onSubmit={handleImport} className="space-y-4">
+                <FormField label="Board Export File" hint=".json exported from another board">
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={e => setImportFile(e.target.files?.[0] || null)}
+                    className="lobby-input cursor-pointer file:mr-3 file:rounded-lg file:border-0 file:px-3 file:py-1 file:text-xs file:font-bold file:cursor-pointer file:bg-[#B58D3D] file:text-[#1C1814]"
+                  />
+                </FormField>
+
+                <FormField label="New Board ID" hint="Optional — defaults to the original board's ID">
+                  <input
+                    type="text"
+                    value={importBoardId}
+                    onChange={e => setImportBoardId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    placeholder="e.g. my-world-part-2"
+                    className="lobby-input"
+                  />
+                </FormField>
+
+                <FormField label="Board Password" hint="Optional — players will need this to join">
+                  <input
+                    type="password"
+                    value={importBoardPassword}
+                    onChange={e => setImportBoardPassword(e.target.value)}
+                    placeholder="Optional"
+                    className="lobby-input"
+                  />
+                </FormField>
+
+                {importError && <ErrorBox>{importError}</ErrorBox>}
+
+                <SubmitButton isLoading={isImporting} label="Import as New Board" loadingLabel="Importing..." />
+
+                <p className="text-[11px] text-[#8C7B6E] leading-relaxed">
+                  Creates a brand-new board owned by you — the original board is untouched. Members are
+                  not copied. Images are preserved when importing on the same server as the export.
+                </p>
               </form>
             </FormCard>
           )}

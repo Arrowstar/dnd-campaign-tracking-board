@@ -189,6 +189,55 @@ export function setTextInValue(existing: string, text: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Remap the target ids of every link token in a value through `idMap`
+ * (used by export/import to point cross-links at newly created items).
+ * A link token whose id has no mapping keeps its title but gets an empty id —
+ * it then renders as plain text (see `getPlainText`).
+ * Handles both storage shapes:
+ *  - Direct: the whole value is a token list (`@@MULTILINK:...` / `@@LINK:...`)
+ *  - Structured: the value is a JSON object whose string sub-values are
+ *    token lists (one entry per structured sub-field key).
+ */
+export function remapLinksInValue(value: string, idMap: Map<string, string>): string {
+  const remapTokens = (v: string): string => {
+    if (!isMultiLinkValue(v) && !isLegacyLinkValue(v)) return v;
+    const tokens = parseTokens(v);
+    let changed = false;
+    const updated = tokens.map((t) => {
+      if (t.type !== 'link') return t;
+      const mapped = idMap.get(t.id);
+      if (mapped === undefined) {
+        if (t.id === '') return t;
+        changed = true;
+        return { ...t, id: '' };
+      }
+      if (mapped === t.id) return t;
+      changed = true;
+      return { ...t, id: mapped };
+    });
+    return changed ? encodeTokens(updated) : v;
+  };
+
+  const direct = remapTokens(value);
+  if (direct !== value) return direct;
+  try {
+    const obj = JSON.parse(value) as unknown;
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        next[k] = typeof v === 'string' ? remapTokens(v) : v;
+        if (next[k] !== v) changed = true;
+      }
+      return changed ? JSON.stringify(next) : value;
+    }
+  } catch {
+    // Not structured (plain text) — already checked directly above.
+  }
+  return value;
+}
+
+/**
  * Update the stored title snapshot of every link token whose id appears in
  * `titleById` so the link reflects the referenced item's current title.
  * Returns the value unchanged when it holds no links or nothing changed.

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser, hashPassword } from '@/lib/auth';
+import { validateBoardId } from '@/lib/exportImport';
 
 export const runtime = 'nodejs';
 
@@ -14,11 +15,8 @@ export async function POST(request: NextRequest) {
       boardPassword?: string;
     };
 
-    if (!boardId) {
-      return NextResponse.json({ error: 'Board ID is required.' }, { status: 400 });
-    }
-    const cleanId = boardId.trim().toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(cleanId) || cleanId.length < 2 || cleanId.length > 48) {
+    const cleanId = validateBoardId(boardId ?? '');
+    if (!cleanId) {
       return NextResponse.json(
         { error: 'Board ID must be 2–48 lowercase letters, numbers, or hyphens.' },
         { status: 400 }

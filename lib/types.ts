@@ -116,7 +116,8 @@ export type DrawingLine = {
 
 export type Comment = {
   id: string;
-  userId: string;
+  /** May be null on imported boards when the original author is not the importer. */
+  userId: string | null;
   userName: string;
   text: string;
   timestamp: string;
@@ -204,4 +205,29 @@ export type BoardState = {
   items?: BoardItem[];
   connections?: Connection[];
   annotations?: BoardAnnotation[];
+};
+
+/**
+ * Canonical board export/import file (Feature 06). The export is the
+ * unscrubbed server state — DM-only. Blob URLs are kept as-is; the blobs
+ * themselves are NOT bundled. `board.id` is informational only; imports always
+ * create a NEW board (see `app/api/boards/[boardId]/import/route.ts`).
+ */
+export type BoardExportFile = {
+  schemaVersion: 1;
+  /** ISO timestamp of the export run (differs per run — not deterministic). */
+  exportedAt: string;
+  app: 'mythos-canvas';
+  board: {
+    /** Original board id — informational only. */
+    id: string;
+    /** = board.id today; kept for future board titles. */
+    name: string;
+    /** Includes tagDefs once board tag colors ship. */
+    settings: BoardSettings;
+    /** Meta only — host-local memberships are ignored on import. */
+    members: Record<string, { role: 'dm' | 'player'; joinedAt: string }>;
+  };
+  /** Full fidelity: items, connections, annotations. Order is preserved. */
+  tabs: BoardTab[];
 };

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid } from 'lucide-react';
+import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download } from 'lucide-react';
 import { BoardSettings } from '@/lib/types';
 
 const CARD_FONT_SCALE_MIN = 75;
@@ -34,6 +34,8 @@ export default function BoardSettingsModal({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   if (!isOpen) return null;
 
@@ -45,10 +47,41 @@ export default function BoardSettingsModal({
   };
 
   const handleClose = () => {
-    if (isSaving) return;
+    if (isSaving || isExporting) return;
     // Revert the canvas to the persisted settings unless they were saved.
     onPreviewChange(initialSettingsRef.current);
     onClose();
+  };
+
+  const handleExport = async () => {
+    setExportError('');
+    setIsExporting(true);
+    try {
+      const res = await fetch(`/api/boards/${boardId}/export`, {
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setExportError(data?.error || 'Failed to export board.');
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      const filename = match?.[1] ?? `${boardId}-${new Date().toISOString().slice(0, 10)}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError('A network error occurred. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -157,6 +190,42 @@ export default function BoardSettingsModal({
                 Reset to 100%
               </button>
             </div>
+          </div>
+
+          {/* Section: Export */}
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Download size={15} className="text-[#B58D3D]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#B58D3D]">Export</span>
+              <span className="text-[10px] text-[#8C7B6E]">Back up this board to a JSON file</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-60"
+              style={{ background: 'rgba(181,141,61,0.12)', border: '1px solid rgba(181,141,61,0.3)', color: '#B58D3D' }}
+            >
+              {isExporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              {isExporting ? 'Exporting…' : 'Export board (JSON)'}
+            </button>
+
+            {exportError && (
+              <div
+                className="mt-2 flex items-center gap-2 p-3 rounded-lg text-sm"
+                style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#FCA5A5' }}
+              >
+                <AlertCircle size={15} className="flex-shrink-0" />
+                <span>{exportError}</span>
+              </div>
+            )}
+
+            <p className="text-[11px] text-[#8C7B6E] leading-relaxed mt-2">
+              Exports every tab, item, connection, annotation, and setting as a single JSON file
+              (DM only). The board password is never included — the imported board gets its own.
+              Images are preserved when importing back into this same server.
+            </p>
           </div>
 
           {/* Feedback */}
