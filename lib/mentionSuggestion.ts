@@ -98,8 +98,13 @@ export function createMentionSuggestion(
                   editor: props.editor,
                 });
                 unmount = props.mount(component.element);
+                console.log('[MENTION] mounted', {
+                  inBody: document.body.contains(component.element),
+                  initialized: (props.editor as any).isEditorContentInitialized,
+                });
               },
               onUpdate: props => {
+                console.log('[MENTION] onUpdate', { itemCount: props.items.length, loading: (props as any).loading });
                 currentItems = props.items;
                 command = props.command;
                 highlighted = Math.min(highlighted, Math.max(0, props.items.length - 1));
