@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X, ChevronRight, Settings, Trash2, MessageSquare, Globe, Eye, Lock,
-  User as UserIcon, Send, Edit3, Check, GripVertical,
+  User as UserIcon, Send, Edit3, Check, GripVertical, Equal,
   Upload, Link as LinkIcon, Image as ImageIcon,
   ChevronUp, ChevronDown, SlidersHorizontal, Crop as CropIcon,
 } from 'lucide-react';
@@ -18,6 +18,7 @@ import {
   movePreviewFieldInLayout,
   updatePreviewSlot,
   setPreviewColumns,
+  equalizeColumnWidths,
   classifyPreviewField,
   resolveFieldMode,
   resolveFieldSpan,
@@ -191,9 +192,18 @@ export default function FocusDrawer({
     onUpdate({ ...item, previewLayout: setPreviewColumns(resolvePreviewLayout(item, item.type, fieldDefs), columns) });
   };
 
+  const equalizeColumns = () => {
+    if (!item || !canEdit) return;
+    onUpdate({ ...item, previewLayout: equalizeColumnWidths(resolvePreviewLayout(item, item.type, fieldDefs)) });
+  };
+
   if (!item) return null;
 
   const previewLayout = resolvePreviewLayout(item, item.type, fieldDefs);
+  const effectiveColumnWidths = getColumnWidths(previewLayout);
+  const isColumnsEven = previewLayout.columns < 2 || effectiveColumnWidths.every(w =>
+    Math.abs(w - 1 / previewLayout.columns) < 1e-6
+  );
 
   return (
     <AnimatePresence>
@@ -531,22 +541,35 @@ export default function FocusDrawer({
 
               {/* Columns + live mini preview */}
               <div className="flex items-start gap-4">
-                <div className="flex flex-col gap-1.5 flex-shrink-0">
+              <div className="flex flex-col gap-1.5 flex-shrink-0">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Columns</span>
-                  <Segmented
-                    value={previewLayout.columns}
-                    options={[
-                      { value: 1, label: '1', title: 'Single column (stacked)' },
-                      { value: 2, label: '2', title: 'Two columns — short fields flow side by side' },
-                      { value: 3, label: '3', title: 'Three columns for denser layouts' },
-                      { value: 4, label: '4', title: 'Four columns for compact multi-field layouts' },
-                    ]}
-                    onChange={changePreviewColumns}
-                  />
-                  <p className="text-[10px] text-[#8C7B6E] leading-snug max-w-[140px]">
-                    More columns let short fields flow side by side.
-                  </p>
+                  {canEdit && previewLayout.columns > 1 && !isColumnsEven && (
+                    <button
+                      type="button"
+                      onClick={equalizeColumns}
+                      title="Reset all columns to equal widths"
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#B58D3D] hover:bg-[#B58D3D]/10 transition-colors cursor-pointer"
+                    >
+                      <Equal size={10} />
+                      Distribute equally
+                    </button>
+                  )}
                 </div>
+                <Segmented
+                  value={previewLayout.columns}
+                  options={[
+                    { value: 1, label: '1', title: 'Single column (stacked)' },
+                    { value: 2, label: '2', title: 'Two columns — short fields flow side by side' },
+                    { value: 3, label: '3', title: 'Three columns for denser layouts' },
+                    { value: 4, label: '4', title: 'Four columns for compact multi-field layouts' },
+                  ]}
+                  onChange={changePreviewColumns}
+                />
+                <p className="text-[10px] text-[#8C7B6E] leading-snug max-w-[140px]">
+                  More columns let short fields flow side by side.
+                </p>
+              </div>
                 <CardPreviewMini layout={previewLayout} item={item} fieldDefs={fieldDefs} canEdit={canEdit} onUpdate={onUpdate} />
               </div>
 

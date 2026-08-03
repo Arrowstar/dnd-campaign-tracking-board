@@ -104,6 +104,11 @@ export function setPreviewColumns(layout: PreviewLayout, columns: PreviewLayout[
   return { ...layout, columns, columnWidths: rebalanceColumnWidths(layout, columns) };
 }
 
+/** Reset all columns back to equal widths (removes any custom columnWidths). */
+export function equalizeColumnWidths(layout: PreviewLayout): PreviewLayout {
+  return { ...layout, columnWidths: undefined };
+}
+
 /** Minimum relative width of any single column, to keep all columns usable. */
 export const MIN_COLUMN_FRACTION = 0.1;
 
