@@ -2375,7 +2375,6 @@ export default function Board({ boardId }: { boardId: string }) {
                 sessionToken={user.sessionToken}
                 settings={boardSettings}
                 onPreviewChange={setBoardSettings}
-                allTagNames={allTagsInUse}
               />
             )}
           </>
