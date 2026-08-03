@@ -1,6 +1,6 @@
 # Feature 08 — @Mentions in Comments
 
-**Status:** Implemented (pending manual two-session verification) · **Priority:** P2 · **Dependencies:** none hard; coordinates with Feature 07 (account deletion must clean up notifications) and Feature 01 (search indexes comment text)
+**Status:** Implemented (verification in progress — autocomplete + highlights confirmed live; notification flows pending two-session check) · **Priority:** P2 · **Dependencies:** none hard; coordinates with Feature 07 (account deletion must clean up notifications) and Feature 01 (search indexes comment text)
 
 ## Summary
 
@@ -99,12 +99,16 @@ Note: this lives in the save path, so it fires for the polled state too — **re
 | `app/api/boards/[boardId]/notifications/route.ts` | **New.** GET (board-scoped, unread-first). |
 | `app/api/boards/[boardId]/notifications/read/route.ts` | **New.** POST mark-read. |
 | `components/FocusDrawer.tsx` | Comment input autocomplete (member list prop from Board); mention-highlight renderer; `initialTab` + `onInitialTabConsumed` deep-link props. |
-| `components/MentionAutocomplete.tsx` | **New.** Pure presentational dropdown — rendered/positioned by the TipTap suggestion plugin (Floating UI), keyboard state driven via `ReactRenderer.updateProps`. |
+| `components/MentionAutocomplete.tsx` | **New.** Pure presentational dropdown — positioned by `lib/mentionSuggestion.ts` (custom mount, see below); keyboard state driven via `ReactRenderer.updateProps`. |
 | `components/NotificationBell.tsx` | **New.** Toolbar bell + dropdown + mark-read. |
 | `components/Board.tsx` | Cache full member records (incl. `username`/`role`) from `/members`; load notifications on mount + after each state apply/save; wire bell; deep-link on notification click (`initialTab='comments'`). |
-| `components/RichTextEditor.tsx` | **New** optional `mentions` prop → `Suggestion.configure({ char: '@', allowSpaces: true })` plugin (no `extension-mention` — plain-text insertion). |
+| `components/RichTextEditor.tsx` | **New** optional `mentions` prop → suggestion extension (no `extension-mention` — plain-text insertion); factory lives in `lib/mentionSuggestion.ts` so the trigger→render pipeline is unit-testable. |
+| `lib/mentionSuggestion.ts` | **New.** `createMentionSuggestion(getMentions)` — `Suggestion`-based `@` extension + `mentionSuggestionKey` (shared `PluginKey`; prosemirror key names are counter-based — never recreate for state reads). |
 | `components/Toolbar.tsx` | `notificationBell` slot (pass-through). |
 | `scripts/backfill-mentions.ts` | **New.** One-off backfill (dry-run flag) — **deferred** per decision; pre-existing mentions won't notify retroactively. |
+
+### Autocomplete popup mounting (why we do NOT use `props.mount`)
+The suggestion plugin's built-in mount relies on Floating UI (`autoUpdate`/`computePosition`) and, in the live app, left the popup in `<body>` **unpositioned** (`position: static`, end of the document → below the fold, invisible). `lib/mentionSuggestion.ts` therefore mounts the popup itself: append `ReactRenderer.element` to `<body>`, pin it to the active `[data-decoration-id]` span with `position: fixed` + `left/top` from its bounding rect (`z-index: 50`, `visibility: visible`), and re-place on scroll/resize (capture phase). Escape/Enter/selection-change still exit via the plugin's normal path. Regression guard: `lib/mentionSuggestion.test.ts` asserts the popup is in `<body>` with `position: fixed` + coordinates.
 
 ### Comment-tab deep link (notification click)
 Implemented via an `initialTab` prop on FocusDrawer (no ref lift needed): Board sets `focusInitialTab='comments'` + `focusedItemId` on notification click; FocusDrawer's effect applies the tab once the item is present (works whether the drawer is already on that item or the item arrives after a tab switch — `handleScrollToItem` switches tabs) and calls `onInitialTabConsumed` so Board clears the request. `handleCloseFocus` also drops any pending request.
@@ -128,7 +132,7 @@ Implemented via an `initialTab` prop on FocusDrawer (no ref lift needed): Board 
 
 ## Acceptance criteria
 
-- [x] `@` autocomplete lists board members; Enter/Tab inserts `@username` (plugin wired; visual verification pending).
+- [x] `@` autocomplete lists board members; Enter/Tab inserts `@username` (verified live on Vercel deployment).
 - [x] Valid mentions render highlighted; invalid `@words` render as plain text (`highlightMentions` + unit tests).
 - [x] Mentioning another member creates a notification for them; self-mentions and non-members produce none (server hook + unit tests; two-session check pending).
 - [x] Bell shows unread count; click navigates to the card + opens Comments tab; mark-read works; rows for deleted items/comments degrade gracefully (manual check pending).

@@ -47,16 +47,8 @@ export function createMentionSuggestion(
           // Multi-word usernames ("jo smith") are real — keep typing spaces.
           allowSpaces: true,
           allowedPrefixes: [' ', '\n'],
-          shouldShow: () => {
-            const n = getMentions().length;
-            console.log('[MENTION] shouldShow', { memberCount: n, show: n > 0 });
-            return n > 0;
-          },
-          items: ({ query }) => {
-            const list = filterMembers(getMentions(), query);
-            console.log('[MENTION] items', { query, count: list.length });
-            return list;
-          },
+          shouldShow: () => getMentions().length > 0,
+          items: ({ query }) => filterMembers(getMentions(), query),
           command: ({ editor: ed, range, props }) => {
             // Plain-text insertion — mentions have no dedicated node type.
             ed.chain().focus().insertContentAt(range, `@${props.member.username} `).run();
@@ -84,7 +76,6 @@ export function createMentionSuggestion(
                 highlighted = 0;
                 currentItems = props.items;
                 command = props.command;
-                console.log('[MENTION] onStart', { itemCount: props.items.length, range: props.range });
                 component = new ReactRenderer(MentionAutocomplete, {
                   props: {
                     items: props.items,
@@ -124,13 +115,8 @@ export function createMentionSuggestion(
                   window.removeEventListener('resize', place);
                   element.remove();
                 };
-                console.log('[MENTION] mounted', {
-                  inBody: document.body.contains(element),
-                  initialized: (props.editor as any).isEditorContentInitialized,
-                });
               },
               onUpdate: props => {
-                console.log('[MENTION] onUpdate', { itemCount: props.items.length, loading: (props as any).loading });
                 currentItems = props.items;
                 command = props.command;
                 highlighted = Math.min(highlighted, Math.max(0, props.items.length - 1));
