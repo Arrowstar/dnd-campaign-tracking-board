@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import { User as UserType, ItemType, AnnotationFontStyle } from '@/lib/types';
-import { 
+import {
   Users, User, Map, Scroll, BookOpen, Clock,
   Swords, Flag, Shield, Activity, Image as ImageIcon,
   MoveRight, X, Palette, Sliders, Minus, MoveHorizontal,
   Circle, Square, Type, Pencil, MousePointer, LogOut,
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound, Keyboard,
-  Undo2, Redo2
+  Undo2, Redo2, Search
 } from 'lucide-react';
 import { 
   ANNOTATION_COLOR_PRESETS, 
@@ -73,6 +73,7 @@ interface ToolbarProps {
   onOpenSettingsModal?: () => void;
   onOpenBoardSettings?: () => void;
   onOpenShortcutsHelp?: () => void;
+  onOpenSearch?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
   onUndo?: () => void;
@@ -108,6 +109,7 @@ export default function Toolbar({
   onOpenSettingsModal,
   onOpenBoardSettings,
   onOpenShortcutsHelp,
+  onOpenSearch,
   canUndo,
   canRedo,
   onUndo,
@@ -228,6 +230,18 @@ export default function Toolbar({
             >
               <Redo2 size={14} className="text-[#B58D3D]" />
               <span>Redo</span>
+            </button>
+          )}
+
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Search every card on the board (Ctrl+K)"
+            >
+              <Search size={14} className="text-[#B58D3D]" />
+              <span>Search</span>
             </button>
           )}
 

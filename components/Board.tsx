@@ -21,6 +21,8 @@ import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
 import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
 import BoardSettingsModal from './BoardSettingsModal';
+import GlobalSearchModal from './GlobalSearchModal';
+import { recordRecentItem } from '@/lib/search';
 
 const BOARD_ITEM_LOD_THRESHOLDS = {
   fullWidth: 130,
@@ -69,6 +71,7 @@ export default function Board({ boardId }: { boardId: string }) {
   const [showUserSettingsModal, setShowUserSettingsModal] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
+  const [openSearch, setOpenSearch] = useState(false);
 
   // DM-managed board-wide settings (card text scale, and more in the future).
   // Hydrated from the board state; changed by the DM via the Board Settings modal.
@@ -110,6 +113,11 @@ export default function Board({ boardId }: { boardId: string }) {
   const connections = activeTab.connections || [];
   const annotations = activeTab.annotations || [];
   const allBoardItems = useMemo(() => tabs.flatMap(t => t.items || []), [tabs]);
+  // Cross-tab items with their owning tab id — the search index input.
+  const allBoardItemsWithTabs = useMemo(
+    () => tabs.flatMap(t => (t.items || []).map(item => ({ item, tabId: t.id }))),
+    [tabs]
+  );
   
   // Real-time tracking for drag offsets and actual DOM dimensions
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
@@ -1174,7 +1182,9 @@ export default function Board({ boardId }: { boardId: string }) {
 
   const handleOpenFocus = useCallback((id: string) => {
     setFocusedItemId(id);
-  }, []);
+    // Track recently opened cards per user+board for the search overlay.
+    if (user) recordRecentItem(boardId, user.id, id);
+  }, [boardId, user]);
 
   const handleCloseFocus = useCallback(() => {
     setFocusedItemId(null);
@@ -1199,6 +1209,19 @@ export default function Board({ boardId }: { boardId: string }) {
   useEffect(() => {
     latestKeyHandlerRef.current = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
+
+      // Global search — wired before the form-field guard so Ctrl+K works
+      // mid-edit (Tiptap, textareas), mirroring Ctrl+Z.
+      const isSearchShortcut = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k';
+      if (isSearchShortcut) {
+        e.preventDefault();
+        setOpenSearch(true);
+        return;
+      }
+
+      // While search is open the overlay owns the keyboard — suppress every
+      // board-level shortcut (the modal's input handles arrows/Enter/Escape).
+      if (openSearch) return;
 
       // Undo/redo — handled before the form-field guard so Ctrl+Z works
       // mid-edit (controlled inputs have no reliable native undo). The Tiptap
@@ -1279,6 +1302,10 @@ export default function Board({ boardId }: { boardId: string }) {
         case 'F':
           if (setTransformRef.current) handleFitView(setTransformRef.current);
           break;
+        case '/':
+          // Open global search from anywhere (only when not typing in a form field).
+          setOpenSearch(true);
+          break;
         case '[':
         case ']': {
           if (selectedAnnId) {
@@ -1357,6 +1384,19 @@ export default function Board({ boardId }: { boardId: string }) {
     }, 50);
   }, [tabs, activeTabId, allBoardItems, itemDimensions]);
 
+  /**
+   * Global-search navigation: close the overlay, then reuse the cross-link
+   * navigation path (tab switch + pan/zoom + flash highlight). Unlike
+   * cross-links, search navigates only — the FocusDrawer opens on Shift+Enter.
+   */
+  const handleSearchNavigate = useCallback((targetId: string, openFocus: boolean) => {
+    setOpenSearch(false);
+    // The card may have been deleted by a remote user while the overlay was open.
+    if (!allBoardItems.some(i => i.id === targetId)) return;
+    handleScrollToItem(targetId);
+    if (openFocus) handleOpenFocus(targetId);
+  }, [allBoardItems, handleScrollToItem, handleOpenFocus]);
+
   if (!user) return <div className="min-h-screen bg-[#F5F2ED] flex items-center justify-center text-[#423D38]">Loading...</div>;
 
   const startItem = connectionStart ? items.find(i => i.id === connectionStart) : null;
@@ -1399,6 +1439,7 @@ export default function Board({ boardId }: { boardId: string }) {
         onOpenSettingsModal={() => setShowUserSettingsModal(true)}
         onOpenBoardSettings={() => setShowBoardSettingsModal(true)}
         onOpenShortcutsHelp={() => setShowShortcutsHelp(true)}
+        onOpenSearch={() => setOpenSearch(true)}
         canUndo={undoCount > 0}
         canRedo={redoCount > 0}
         onUndo={handleUndo}
@@ -2044,6 +2085,16 @@ export default function Board({ boardId }: { boardId: string }) {
               isOpen={showShortcutsHelp}
               onClose={() => setShowShortcutsHelp(false)}
             />
+            {openSearch && (
+              <GlobalSearchModal
+                isOpen
+                onClose={() => setOpenSearch(false)}
+                items={allBoardItemsWithTabs}
+                tabs={tabs}
+                user={user}
+                onNavigate={handleSearchNavigate}
+              />
+            )}
             {showBoardSettingsModal && (
               <BoardSettingsModal
                 isOpen

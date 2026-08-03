@@ -55,6 +55,14 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
     ],
   },
   {
+    title: 'Search',
+    icon: <CornerDownLeft size={14} className="text-[#B58D3D]" />,
+    rows: [
+      { keys: ['Ctrl', 'K'], action: 'Search every card on the board', detail: 'Across all tabs — Esc closes' },
+      { keys: ['/', 'Slash'], action: 'Open search', detail: 'When not typing in a field' },
+    ],
+  },
+  {
     title: 'Cancel & Close',
     icon: <CornerUpLeft size={14} className="text-[#B58D3D]" />,
     rows: [
