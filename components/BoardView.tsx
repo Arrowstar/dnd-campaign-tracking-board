@@ -554,6 +554,11 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
               );
             }}
           </TransformWrapper>
+
+          {/* Request-to-join CTA (Feature 09): upgrades anonymous viewers */}
+          <div className="absolute bottom-4 left-4 z-50">
+            <JoinCta boardId={boardId} compact />
+          </div>
         </div>
       </div>
 
@@ -579,7 +584,18 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
 }
 
 /** Gentle upgrade path: prefill the lobby join flow with this board id. */
-function JoinCta({ boardId }: { boardId: string }) {
+function JoinCta({ boardId, compact = false }: { boardId: string; compact?: boolean }) {
+  if (compact) {
+    return (
+      <a
+        href={`/?join=${encodeURIComponent(boardId)}`}
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-[#2C2824] border border-[#B58D3D] shadow-2xl text-[#E0D8D0] hover:bg-[#423D38]"
+      >
+        <LogIn size={13} className="text-[#B58D3D]" />
+        Request to join
+      </a>
+    );
+  }
   return (
     <a
       href={`/?join=${encodeURIComponent(boardId)}`}
