@@ -350,8 +350,9 @@ interface BoardItemProps {
   lodThresholds?: BoardItemLodThresholds;
   /** Board-wide card text scale multiplier (1 = default 100%), set by the DM. */
   fontScale?: number;
-  /** Called when user wants to open the focus drawer for this item */
-  onOpenFocus?: (id: string) => void;
+  /** Called when user wants to open the focus drawer for this item. The
+   *  optional second arg deep-links the drawer to a specific tab. */
+  onOpenFocus?: (id: string, initialTab?: 'content' | 'comments' | 'preview') => void;
   /** Tag click → board-wide tag filter toggle (per Feature 02). */
   onToggleTagFilter?: (tag: string) => void;
   /** Board-wide tag definitions (colors). */
@@ -1535,7 +1536,7 @@ export default memo(function BoardItem({
           className="flex items-center gap-0.5 hover:text-[#423D38] font-bold flex-shrink-0 cursor-pointer"
           onPointerDown={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation?.(); }}
           onPointerDownCapture={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation?.(); }}
-          onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id); }}
+          onClick={(e) => { e.stopPropagation(); onOpenFocus?.(item.id, 'comments'); }}
           title="View comments"
         >
           <MessageSquare size={10} />

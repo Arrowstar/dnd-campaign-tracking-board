@@ -112,6 +112,7 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
   const [zoomScale, setZoomScale] = useState(100);
   const [viewPan, setViewPan] = useState({ positionX: 0, positionY: 0 });
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const [focusInitialTab, setFocusInitialTab] = useState<'content' | 'comments' | 'preview' | null>(null);
 
   const transformRef = useRef({ positionX: 0, positionY: 0, scale: 1 });
   const setTransformRef = useRef<((x: number, y: number, scale: number, duration?: number) => void) | null>(null);
@@ -518,7 +519,7 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
                           zoomScale={zoomScale / 100}
                           lodThresholds={BOARD_ITEM_LOD_THRESHOLDS}
                           fontScale={cardFontScale}
-                          onOpenFocus={(id) => setFocusedItemId(id)}
+                          onOpenFocus={(id, initialTab) => { setFocusedItemId(id); setFocusInitialTab(initialTab ?? null); }}
                           readOnly
                         />
                       ))}
@@ -573,6 +574,8 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
           onUpdate={() => {}}
           onDelete={() => {}}
           onClose={() => setFocusedItemId(null)}
+          initialTab={focusInitialTab ?? undefined}
+          onInitialTabConsumed={() => setFocusInitialTab(null)}
           onScrollToItem={handleScrollToItem}
           width={480}
           onWidthChange={() => {}}

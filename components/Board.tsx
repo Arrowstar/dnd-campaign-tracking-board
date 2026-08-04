@@ -1614,8 +1614,9 @@ export default function Board({ boardId }: { boardId: string }) {
     setFocusedItemId(prev => (prev && ids.has(prev) ? null : prev));
   }, [items, connections, activeTab.annotations, editableSelectedItems, confirmBulkDelete, dragOffsets, itemDimensions, saveState, clearItemSelection]);
 
-  const handleOpenFocus = useCallback((id: string) => {
+  const handleOpenFocus = useCallback((id: string, initialTab?: 'content' | 'comments' | 'preview') => {
     setFocusedItemId(id);
+    setFocusInitialTab(initialTab ?? null);
     // Track recently opened cards per user+board for the search overlay.
     if (user) recordRecentItem(boardId, user.id, id);
   }, [boardId, user]);
