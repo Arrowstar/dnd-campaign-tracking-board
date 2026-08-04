@@ -80,7 +80,12 @@ export async function POST(
       const storedTabs: any[] = storedRows[0]?.tabs || [];
       // Owners may only be reassigned to existing board members.
       const memberIds = new Set(Object.keys(rows[0].members || {}));
-      const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role }, memberIds);
+      const merged = mergeTabsForSave(
+        storedTabs,
+        tabs,
+        { id: user.id, role: member.role, displayName: user.displayName },
+        memberIds
+      );
       // Keep link-token title snapshots in sync with item titles.
       const synced = syncLinkTitles(merged);
       // Allowlist-sanitize every rich-text slot (item content, field text
