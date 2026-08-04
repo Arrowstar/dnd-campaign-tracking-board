@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { BoardItem as BoardItemType, Connection, User, BoardTab, BoardAnnotation, AnnotationFontStyle, BoardSettings } from '@/lib/types';
 import BoardItem, { ITEM_FIELD_DEFS } from './BoardItem';
@@ -14,7 +14,8 @@ import { getResolvedControlPoints } from '@/lib/annotationUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
-import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react';
+import { alignItemPositions, AlignMode } from '@/lib/alignment';
 import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles, sameItemTitles } from '@/lib/crossref';
 import { syncRichTextCardLinks } from '@/lib/cardLinks';
@@ -53,6 +54,18 @@ const BOARD_ITEM_LOD_THRESHOLDS = {
   pinExpandSize: 56,
   pinScreenSize: 36,
 };
+
+// Bulk-bar alignment actions: icons + labels for the Align… popover. The three
+// "vertical" variants align along the horizontal axis (left/center/right) and
+// the three "horizontal" variants along the vertical axis (top/middle/bottom).
+const ALIGN_ACTIONS: { mode: AlignMode; label: string; title: string; icon: ReactNode }[] = [
+  { mode: 'left', label: 'Left', title: 'Align left edges', icon: <AlignStartHorizontal size={16} /> },
+  { mode: 'center-x', label: 'Center', title: 'Align vertical midlines', icon: <AlignCenterHorizontal size={16} /> },
+  { mode: 'right', label: 'Right', title: 'Align right edges', icon: <AlignEndHorizontal size={16} /> },
+  { mode: 'top', label: 'Top', title: 'Align top edges', icon: <AlignStartVertical size={16} /> },
+  { mode: 'middle-y', label: 'Middle', title: 'Align horizontal midlines', icon: <AlignCenterVertical size={16} /> },
+  { mode: 'bottom', label: 'Bottom', title: 'Align bottom edges', icon: <AlignEndVertical size={16} /> },
+];
 
 // Undo/redo history (Feature 11): maximum retained steps, the time window in
 // which consecutive mutations to the same target (item/connection/annotation/
@@ -323,6 +336,7 @@ export default function Board({ boardId }: { boardId: string }) {
   // `selectedItemId`; the Set is the render source of truth for the gold ring.
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkAlignOpen, setBulkAlignOpen] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   // Feature 02 — tags: definitions, autocomplete vocabulary, and filter math.
@@ -352,6 +366,7 @@ export default function Board({ boardId }: { boardId: string }) {
     setSelectedItemId(null);
     setSelectedItemIds(new Set());
     setBulkTagOpen(false);
+    setBulkAlignOpen(false);
     setConfirmBulkDelete(false);
   }, []);
   
@@ -1580,6 +1595,23 @@ export default function Board({ boardId }: { boardId: string }) {
     setConfirmBulkDelete(false);
   }, [items, connections, editableSelectedItems, saveState]);
 
+  // Bulk action: align the selected (editable) items along an axis. The pure
+  // geometry lives in lib/alignment.ts; positions are computed from the items'
+  // stored width/height so the result is deterministic regardless of zoom/LOD.
+  // One saveState call → a single undo/redo step that also syncs to other tabs.
+  const handleAlignItems = useCallback((mode: AlignMode) => {
+    if (editableSelectedItems.length === 0) return;
+    const positions = alignItemPositions(editableSelectedItems, mode);
+    const newItems = items.map(i => {
+      const p = positions[i.id];
+      if (!p) return i;
+      return { ...i, x: p.x, y: p.y };
+    });
+    saveState(newItems, connections, undefined, 'align');
+    setBulkAlignOpen(false);
+    setConfirmBulkDelete(false);
+  }, [items, connections, editableSelectedItems, saveState]);
+
   const handleBulkDelete = useCallback(() => {
     if (editableSelectedItems.length === 0) return;
     if (!confirmBulkDelete) {
@@ -1685,6 +1717,25 @@ export default function Board({ boardId }: { boardId: string }) {
       // A focused button/link owns the Enter key — let it activate natively.
       if (e.key === 'Enter' && activeEl && (activeEl.tagName === 'BUTTON' || activeEl.tagName === 'A')) return;
       if (showMembersModal || showUserSettingsModal || showBoardSettingsModal) return;
+
+      // Align multi-selected items (Ctrl/⌘ + Shift + Alt + letter). Requires the
+      // full three-modifier combo so it never collides with the no-modifier
+      // switch below or browser/editor shortcuts.
+      if (e.ctrlKey || e.metaKey) {
+        if (e.shiftKey && e.altKey && selectedItemIds.size > 0 && editableSelectedItems.length > 0) {
+          const alignKey: Record<string, AlignMode> = {
+            l: 'left', c: 'center-x', r: 'right',
+            t: 'top', m: 'middle-y', b: 'bottom',
+          };
+          const mode = alignKey[e.key.toLowerCase()];
+          if (mode) {
+            e.preventDefault();
+            handleAlignItems(mode);
+            return;
+          }
+        }
+      }
+
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       switch (e.key) {
@@ -1916,6 +1967,7 @@ export default function Board({ boardId }: { boardId: string }) {
           setSelectedItemId(null);
           setSelectedItemIds(new Set());
           setBulkTagOpen(false);
+          setBulkAlignOpen(false);
           setConfirmBulkDelete(false);
           setActiveTabId(tabId);
           // Apply the tab's stored view — its precomputed fit on first view,
@@ -2582,6 +2634,18 @@ export default function Board({ boardId }: { boardId: string }) {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setBulkAlignOpen(v => !v)}
+                  disabled={editableSelectedItems.length === 0}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
+                    bulkAlignOpen ? 'bg-[#B58D3D] text-[#1C1814]' : 'text-[#E0D8D0] hover:bg-white/10'
+                  }`}
+                  title="Align all selected (editable) cards"
+                >
+                  <AlignStartHorizontal size={12} className={bulkAlignOpen ? '' : 'text-[#B58D3D]'} />
+                  Align…
+                </button>
+                <button
+                  type="button"
                   onClick={handleBulkDelete}
                   disabled={editableSelectedItems.length === 0}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
@@ -2600,6 +2664,32 @@ export default function Board({ boardId }: { boardId: string }) {
                   <X size={12} /> Clear
                 </button>
               </div>
+
+              {/* Bulk Align popover — 6 alignment actions on the selection */}
+              {bulkAlignOpen && (
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#2C2824]/98 backdrop-blur-sm border border-[#B58D3D] rounded-xl p-3 shadow-2xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] mb-2">
+                    Align {editableSelectedItems.length} selected card{editableSelectedItems.length === 1 ? '' : 's'}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {ALIGN_ACTIONS.map(a => (
+                      <button
+                        key={a.mode}
+                        type="button"
+                        onClick={() => handleAlignItems(a.mode)}
+                        className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg text-[#E0D8D0] hover:bg-[#B58D3D] hover:text-[#1C1814] transition-colors cursor-pointer"
+                        title={a.title}
+                      >
+                        {a.icon}
+                        <span className="text-[10px] font-bold">{a.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-[#8C7B6E] mt-2">
+                    Uses the group&apos;s bounding box as the reference.
+                  </p>
+                </div>
+              )}
 
               {/* Bulk Tag popover — same tag editor as the focus drawer */}
               {bulkTagOpen && (

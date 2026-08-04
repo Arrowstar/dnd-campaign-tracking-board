@@ -35,6 +35,18 @@ const SHORTCUT_GROUPS: { title: string; icon: React.ReactNode; rows: ShortcutRow
     ],
   },
   {
+    title: 'Align selection',
+    icon: <MousePointerClick size={14} className="text-[#B58D3D]" />,
+    rows: [
+      { keys: ['Ctrl', 'Shift', 'Alt', 'L'], action: 'Align selected cards left', detail: 'Multi-select cards first (Ctrl/⌘ + click)' },
+      { keys: ['Ctrl', 'Shift', 'Alt', 'C'], action: 'Align selected cards center' },
+      { keys: ['Ctrl', 'Shift', 'Alt', 'R'], action: 'Align selected cards right' },
+      { keys: ['Ctrl', 'Shift', 'Alt', 'T'], action: 'Align selected cards top' },
+      { keys: ['Ctrl', 'Shift', 'Alt', 'M'], action: 'Align selected cards middle' },
+      { keys: ['Ctrl', 'Shift', 'Alt', 'B'], action: 'Align selected cards bottom' },
+    ],
+  },
+  {
     title: 'History',
     icon: <Undo2 size={14} className="text-[#B58D3D]" />,
     rows: [
