@@ -41,6 +41,45 @@ body {
   text-decoration-color: rgba(181, 141, 61, 0.6);
 }
 
+/* Feature 10 — card-link chips INSIDE the TipTap editor. The stored span
+   carries no class (the .card-link class is render-time decoration for
+   display/preview only), so edit-mode chips are styled by attribute within
+   the editor surface (.tiptap). The leading link icon and trailing item-type
+   badge make a reference read as a reference while editing — the badge
+   answers "what kind of object am I looking at", and the pill tells users
+   that text typed inside it is NOT free text (it gets reverted to the
+   target item's title on save). */
+.tiptap span[data-card-id] {
+  background: rgba(181, 141, 61, 0.16);
+  color: inherit;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 0 4px;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.tiptap span[data-card-id]::before {
+  content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 24 24' fill='none' stroke='%238a6420' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E");
+  display: inline-block;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+.tiptap span[data-card-id]::after {
+  content: attr(data-card-type);
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 3px;
+  background: rgba(181, 141, 61, 0.25);
+  border-radius: 3px;
+  padding: 0 3px;
+  vertical-align: 1px;
+}
+
 .react-transform-component {
   width: 100% !important;
   height: 100% !important;
