@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download, Link2, AlertTriangle, Trash2 } from 'lucide-react';
+import { X, Sliders, RotateCcw, CheckCircle2, AlertCircle, Loader2, LayoutGrid, Download, Link2, AlertTriangle, Trash2, Database } from 'lucide-react';
 import { BoardSettings } from '@/lib/types';
 import { downloadBoardExport } from '@/lib/exportImport';
+import { WARN_SAVE_BYTES, formatBytes } from '@/lib/boardLimits';
 import ShareLinksModal from './ShareLinksModal';
 import DeleteBoardModal from './DeleteBoardModal';
 
@@ -19,6 +20,8 @@ interface BoardSettingsModalProps {
   settings: BoardSettings;
   /** Live-apply a draft so the canvas behind the modal updates immediately. */
   onPreviewChange: (settings: BoardSettings) => void;
+  /** Approximate serialized board size (Feature 12) — informational only. */
+  boardSizeBytes?: number;
 }
 
 export default function BoardSettingsModal({
@@ -27,6 +30,7 @@ export default function BoardSettingsModal({
   boardId,
   settings,
   onPreviewChange,
+  boardSizeBytes,
 }: BoardSettingsModalProps) {
   // Persisted settings as of opening the modal — the baseline to revert the
   // canvas to if the user cancels. The component mounts fresh on every open.
@@ -173,6 +177,26 @@ export default function BoardSettingsModal({
               </button>
             </div>
           </div>
+
+          {/* Section: Board size */}
+          {boardSizeBytes !== undefined && (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Database size={15} className="text-[#B58D3D]" />
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#B58D3D]">Board size</span>
+                <span className="text-[10px] text-[#8C7B6E]">Serialized size of the saved board</span>
+              </div>
+              <p className="text-[13px] text-[#8C7B6E] leading-relaxed">
+                <span className="font-mono font-bold text-[#B58D3D]">{formatBytes(boardSizeBytes)}</span>
+                {boardSizeBytes > WARN_SAVE_BYTES && (
+                  <span className="text-[#FCA5A5]">
+                    {' '}— getting large. Consider splitting tabs or running the image
+                    migration so saves stay fast and under the size limit.
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
 
           {/* Section: Export */}
           <div>

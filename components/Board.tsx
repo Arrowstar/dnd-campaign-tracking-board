@@ -16,9 +16,11 @@ import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
-import { syncLinkTitles } from '@/lib/crossref';
+import { syncLinkTitles, sameItemTitles } from '@/lib/crossref';
 import { syncRichTextCardLinks } from '@/lib/cardLinks';
 import { allTagNames, tagColor, isLightColor } from '@/lib/tags';
+import { buildSaveOps } from '@/lib/scalability';
+import { CLIENT_MAX_SAVE_BYTES, WARN_SAVE_BYTES, formatBytes } from '@/lib/boardLimits';
 import UploadProgress from './UploadProgress';
 import UserSettingsModal from './UserSettingsModal';
 import MemberManagementModal from './MemberManagementModal';
@@ -36,6 +38,7 @@ import {
   clearHistoryForBoard,
   HISTORY_LIMIT,
   UndoEntry,
+  HistoryPatch,
 } from '@/lib/undoHistory';
 import NotificationBell from './NotificationBell';
 import type { NotificationRow } from '@/app/api/boards/[boardId]/notifications/route';
@@ -99,6 +102,32 @@ export default function Board({ boardId }: { boardId: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // Save/sync status for the tab-bar indicator: 'saved' | 'saving' | 'syncing' | 'error'
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'syncing' | 'error'>('saved');
+
+  // Feature 12 — approximate board size in bytes: exact on full serializations
+  // (loads, remote applies, full-tabs saves), grown by item-delta payloads
+  // between them. Powers the DM "getting large" warning and the Board Settings
+  // size indicator without re-serializing the board on every keystroke.
+  const boardSizeBytesRef = useRef(0);
+  const [boardSizeBytes, setBoardSizeBytes] = useState(0);
+  const updateBoardSize = useCallback((bytes: number) => {
+    boardSizeBytesRef.current = bytes;
+    setBoardSizeBytes(bytes);
+  }, []);
+  const growBoardSize = useCallback((bytes: number) => {
+    boardSizeBytesRef.current += bytes;
+    setBoardSizeBytes(boardSizeBytesRef.current);
+  }, []);
+
+  // Feature 12 — transient "board is getting large" notice for DMs (once per
+  // session; the 4 MB hard block below still guards the save itself).
+  const [sizeWarning, setSizeWarning] = useState<string | null>(null);
+  const sizeWarningShownRef = useRef(false);
+  const sizeWarningTimerRef = useRef<number | null>(null);
+  const showSizeWarning = useCallback((message: string) => {
+    setSizeWarning(message);
+    if (sizeWarningTimerRef.current !== null) window.clearTimeout(sizeWarningTimerRef.current);
+    sizeWarningTimerRef.current = window.setTimeout(() => setSizeWarning(null), 8000);
+  }, []);
 
   // Board member display names (for member-select field widgets)
   const [memberNames, setMemberNames] = useState<string[]>([]);
@@ -517,6 +546,7 @@ export default function Board({ boardId }: { boardId: string }) {
           }];
         }
         setTabs(parsedTabs);
+        updateBoardSize(JSON.stringify(parsedTabs).length);
         setActiveTabId(prev => {
           if (parsedTabs.some(t => t.id === prev)) return prev;
           return parsedTabs[0]?.id || 'default-tab';
@@ -533,7 +563,7 @@ export default function Board({ boardId }: { boardId: string }) {
         setRedoCount(redoStackRef.current.length);
       })
       .catch(err => console.error('Failed to load board:', err));
-  }, [boardId]);
+  }, [boardId, updateBoardSize]);
 
   // On initial board entry, precompute the fit transform for EVERY tab (once,
   // immediately) and apply the active tab's fit. Later tab switches only apply
@@ -594,7 +624,11 @@ export default function Board({ boardId }: { boardId: string }) {
 
     const applyFullState = async (): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/boards/${boardId}/state`);
+        // Feature 12 — conditional refetch: the server answers 304 when the
+        // stored revision still matches the one we already applied, skipping
+        // the full payload.
+        const since = appliedRevisionRef.current ?? '';
+        const res = await fetch(`/api/boards/${boardId}/state?since=${encodeURIComponent(since)}`);
         if (res.status === 401) {
           handleSessionLost();
           return false;
@@ -607,10 +641,12 @@ export default function Board({ boardId }: { boardId: string }) {
           handleBoardDeleted();
           return false;
         }
+        if (res.status === 304) return true;
         if (!res.ok) return false;
         const data = (await res.json()) as { tabs: BoardTab[] | undefined; settings?: BoardSettings };
         if (cancelled || !data.tabs || !Array.isArray(data.tabs)) return false;
         const freshTabs: BoardTab[] = data.tabs;
+        updateBoardSize(JSON.stringify(freshTabs).length);
         if (data.settings && typeof data.settings === 'object') {
           setBoardSettings(data.settings);
         }
@@ -681,7 +717,7 @@ export default function Board({ boardId }: { boardId: string }) {
       window.removeEventListener('focus', poll);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [boardId, user, refreshNotifications]);
+  }, [boardId, user, refreshNotifications, updateBoardSize]);
 
   // All saves are chained onto this promise so requests hit the server strictly
   // in order — otherwise two concurrent saves can resolve out of order and an
@@ -689,19 +725,41 @@ export default function Board({ boardId }: { boardId: string }) {
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const persistBoardState = useCallback(
-    (updatedTabs: BoardTab[]) => {
+    (updatedTabs: BoardTab[], patch?: HistoryPatch) => {
       if (!user) return;
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         setSaveStatus('saving');
-        const body = JSON.stringify({ tabs: updatedTabs });
-        const approxMb = body.length / (1024 * 1024);
-        if (approxMb > 4) {
-          console.error(`Board payload is ${approxMb.toFixed(2)} MB — too large to save.`);
-          setSaveError(
-            'This board is too large to save (likely an old image stored directly in the board instead of as a link). Contact the DM about running the image migration.'
-          );
-          setSaveStatus('error');
-          return;
+        // Feature 12 / Phase 2.5 — item-delta saves: when the change is pure
+        // item upserts (no renames/deletes/connections/annotations/tabs), send
+        // { ops: [...] } instead of the full tabs. The server applies the same
+        // merge/sanitize pipeline and patches boards.tabs per-item.
+        const ops = patch ? buildSaveOps(patch) : null;
+        const body = ops ? JSON.stringify({ ops }) : JSON.stringify({ tabs: updatedTabs });
+        const approxBytes = body.length;
+
+        if (ops) {
+          // Delta bodies are always small; the tracked size grows by the delta.
+          growBoardSize(approxBytes);
+        } else {
+          updateBoardSize(approxBytes);
+          if (approxBytes > CLIENT_MAX_SAVE_BYTES) {
+            console.error(`Board payload is ${formatBytes(approxBytes)} — too large to save.`);
+            setSaveError(
+              'This board is too large to save (likely an old image stored directly in the board instead of as a link). Contact the DM about running the image migration.'
+            );
+            setSaveStatus('error');
+            return;
+          }
+          if (
+            approxBytes > WARN_SAVE_BYTES &&
+            user.role === 'dm' &&
+            !sizeWarningShownRef.current
+          ) {
+            sizeWarningShownRef.current = true;
+            showSizeWarning(
+              `This board is getting large (~${(approxBytes / (1024 * 1024)).toFixed(1)} MB) — consider splitting tabs or running the image migration.`
+            );
+          }
         }
         try {
           const res = await fetch(`/api/boards/${boardId}/state`, {
@@ -747,7 +805,7 @@ export default function Board({ boardId }: { boardId: string }) {
         }
       });
     },
-    [boardId, user, refreshNotifications]
+    [boardId, user, refreshNotifications, updateBoardSize, growBoardSize, showSizeWarning]
   );
 
   // ── Feature 11 — history persistence (debounced localStorage writes) ────────
@@ -794,7 +852,7 @@ export default function Board({ boardId }: { boardId: string }) {
     skipNoticeTimerRef.current = window.setTimeout(() => setSkipNotice(null), 3000);
   }, []);
 
-  const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string) => {
+  const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string, patch?: HistoryPatch) => {
     const stack = undoStackRef.current;
     const last = stack[stack.length - 1];
     const now = Date.now();
@@ -826,7 +884,9 @@ export default function Board({ boardId }: { boardId: string }) {
       entry: {
         key,
         time: now,
-        patch: computeDiff(prevTabs, nextTabs),
+        // The caller-computed patch (when provided) is reused for the save
+        // body below — Feature 12 computes it once for both.
+        patch: patch ?? computeDiff(prevTabs, nextTabs),
         activeTabIdBefore: activeTabId,
         activeTabIdAfter: afterActiveTabId,
       },
@@ -848,7 +908,11 @@ export default function Board({ boardId }: { boardId: string }) {
     const reconciled = applyPatch(tabs, entry.patch, 'undo');
     setTabs(reconciled.tabs);
     setActiveTabId(entry.activeTabIdBefore);
-    if (reconciled.tabs !== tabs) persistBoardState(reconciled.tabs);
+    if (reconciled.tabs !== tabs) {
+      // Feature 12 — the save body is derived from the same diff the undo just
+      // reconciled, so it carries exactly the local revert.
+      persistBoardState(reconciled.tabs, computeDiff(tabs, reconciled.tabs));
+    }
     clearItemSelection();
     // Prune the focused item if the reconciled state no longer contains it.
     setFocusedItemId(prev =>
@@ -870,7 +934,9 @@ export default function Board({ boardId }: { boardId: string }) {
     const reconciled = applyPatch(tabs, entry.patch, 'redo');
     setTabs(reconciled.tabs);
     setActiveTabId(entry.activeTabIdAfter);
-    if (reconciled.tabs !== tabs) persistBoardState(reconciled.tabs);
+    if (reconciled.tabs !== tabs) {
+      persistBoardState(reconciled.tabs, computeDiff(tabs, reconciled.tabs));
+    }
     clearItemSelection();
     setFocusedItemId(prev =>
       prev && reconciled.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
@@ -899,19 +965,24 @@ export default function Board({ boardId }: { boardId: string }) {
       });
 
       // Keep link-token title snapshots in sync with item titles so the UI
-      // (and the persisted copy) reflect renames immediately.
-      let syncedTabs = syncLinkTitles(updatedTabs);
+      // (and the persisted copy) reflect renames immediately. Skipped when no
+      // title changed (Feature 12) — the whole-board walk is the expensive part.
+      let syncedTabs = sameItemTitles(tabs, updatedTabs) ? updatedTabs : syncLinkTitles(updatedTabs);
       // Feature 10 — same pass for rich-text card links: unwrap links to
       // deleted items, retitle links to renamed ones (instant UI feedback;
       // the server re-runs this authoritatively in the state-save route).
       syncedTabs = syncRichTextCardLinks(syncedTabs);
 
+      // Feature 12 — compute the mutation diff once: it feeds both the undo
+      // history entry and the (possibly items-only) save body.
+      const patch = computeDiff(tabs, syncedTabs);
+
       // Record the before/after pair for undo/redo (before the state lands).
-      recordHistory(tabs, syncedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`);
+      recordHistory(tabs, syncedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`, undefined, patch);
 
       setTabs(syncedTabs);
       // Trigger asynchronous persistence
-      persistBoardState(syncedTabs);
+      persistBoardState(syncedTabs, patch);
     },
     [tabs, activeTabId, recordHistory, persistBoardState]
   );
@@ -980,9 +1051,10 @@ export default function Board({ boardId }: { boardId: string }) {
 
   const saveFullTabsState = useCallback(
     (updatedTabs: BoardTab[], historyKey?: string, nextActiveTabId?: string) => {
-      recordHistory(tabs, updatedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`, nextActiveTabId);
+      const patch = computeDiff(tabs, updatedTabs);
+      recordHistory(tabs, updatedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`, nextActiveTabId, patch);
       setTabs(updatedTabs);
-      persistBoardState(updatedTabs);
+      persistBoardState(updatedTabs, patch);
     },
     [tabs, recordHistory, persistBoardState]
   );
@@ -1713,6 +1785,11 @@ export default function Board({ boardId }: { boardId: string }) {
       {skipNotice && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-amber-600 text-white text-sm text-center py-1.5 px-4">
           {skipNotice}
+        </div>
+      )}
+      {sizeWarning && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-amber-600 text-white text-sm text-center py-1.5 px-4">
+          {sizeWarning}
         </div>
       )}
       <Toolbar 
@@ -2554,6 +2631,7 @@ export default function Board({ boardId }: { boardId: string }) {
                 boardId={boardId}
                 settings={boardSettings}
                 onPreviewChange={setBoardSettings}
+                boardSizeBytes={boardSizeBytes}
               />
             )}
           </>
