@@ -86,7 +86,7 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 - **Push updates:** replace 3 s polling with SSE (or WebSocket) for revision changes; keep the poller as fallback. Reduces both latency and request volume. Cost: connection lifecycle in a serverless env (or a small long-lived process).
 - **Revision cache:** short-circuit the `updated_at` SELECT with an in-memory (per-instance) or Upstash/Redis cache keyed by boardId; trivial for polling load.
 - **Read replica / dedicated Postgres:** only if active boards × members exceed a small multiple of the current scale; Neon's pooler already handles connection churn.
-- **Blob GC:** delete orphaned image blobs when items/boards are removed (Vercel Blob supports server-side delete; today nothing cleans up). Independent of everything here.
+- **Blob GC:** delete orphaned image blobs when items/boards are removed (Vercel Blob supports server-side delete; today nothing cleans up). **DONE Aug 2026** — `scripts/cleanup-orphaned-blobs.ts` (dry-run default, `--delete` flag): scans all boards for referenced URLs (`item.content`, `field.imageUrl`, `field.files[].url`, rich-text `src=`), lists the blob store with pagination, deletes unreferenced blobs. First run: 6 orphans / 13.72 MB recovered (store 50.34 → 36.62 MB). Re-run anytime; the blob store has no history-table references (Feature 05 not built).
 
 ## Files (Phase 1 + 2)
 
