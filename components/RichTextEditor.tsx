@@ -67,6 +67,12 @@ interface RichTextEditorProps {
    * autocomplete; selecting a member inserts a plain `@username` mention.
    */
   mentions?: MentionableMember[];
+  /**
+   * Board the editor belongs to. Required for image uploads — the server
+   * verifies membership before issuing an upload token
+   * (Security-Audit.md medium #5).
+   */
+  boardId: string;
 }
 
 const FONT_SIZES = [
@@ -154,6 +160,7 @@ export function RichTextEditor({
   compact = false,
   disabled = false,
   mentions,
+  boardId,
 }: RichTextEditorProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showFontSizePicker, setShowFontSizePicker] = useState(false);
@@ -287,6 +294,7 @@ export function RichTextEditor({
     setImageUpload({ percent: 0, error: null });
     try {
       const url = await uploadFileToBlob(file, {
+        boardId,
         onProgress: (percent) => setImageUpload(prev => (prev ? { ...prev, percent } : prev)),
       });
       editor.chain().focus().setImage({ src: url }).run();

@@ -1,12 +1,18 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
-import { hashPassword, generateToken, setSessionCookie } from '@/lib/auth';
+import { hashPassword, generateToken, setSessionCookie, SESSION_LIFETIME_SECONDS } from '@/lib/auth';
+import { authLimited, REGISTER_LIMIT, REGISTER_WINDOW_MS } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
+    // Cap account-creation rate per IP so the open register endpoint can't be
+    // used to farm accounts for abuse (Security-Audit.md medium #5/#6).
+    const limited = authLimited(request, 'register', REGISTER_LIMIT, REGISTER_WINDOW_MS);
+    if (limited) return limited;
+
     const { username, password } = (await request.json()) as { username?: string; password?: string };
 
     if (!username || !password) {
@@ -21,12 +27,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 });
+    if (password.length < 8 || password.length > 128) {
+      return NextResponse.json(
+        { error: 'Password must be 8–128 characters.' },
+        { status: 400 }
+      );
     }
 
     await ensureSchema();
     const sql = getSql();
+
+    // Opportunistic prune of expired sessions.
+    await sql`DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < NOW()`;
 
     const lowerUsername = username.trim().toLowerCase();
     // Deleted accounts are renamed (`deleted_<id>`, Feature 07) so this check
@@ -46,7 +58,10 @@ export async function POST(request: NextRequest) {
     `;
 
     const sessionToken = generateToken();
-    await sql`INSERT INTO sessions (token, user_id) VALUES (${sessionToken}, ${userId})`;
+    await sql`
+      INSERT INTO sessions (token, user_id, expires_at)
+      VALUES (${sessionToken}, ${userId}, NOW() + make_interval(secs => ${SESSION_LIFETIME_SECONDS}))
+    `;
 
     // Session rides an HttpOnly cookie — never exposed to JS (Security-Audit.md
     // critical #2). The body still carries the token for transitional clients.

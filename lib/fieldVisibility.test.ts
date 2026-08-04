@@ -71,7 +71,7 @@ describe('mergeCommentsForSave', () => {
   it('stamps the authenticated user on new comments, ignoring client attribution', () => {
     const stored = [makeComment('c1')];
     const incoming = [
-      { id: 'c1', ...makeComment('c1') },
+      { ...makeComment('c1'), id: 'c1' },
       {
         id: 'c2',
         userId: 'u-dm', // forged: claims to be the DM

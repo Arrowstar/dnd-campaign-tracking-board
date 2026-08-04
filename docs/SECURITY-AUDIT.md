@@ -77,25 +77,43 @@ stored-XSS path that defeats the auth system entirely.
 
 ## MEDIUM
 
-### 5. Unauthenticated upload endpoint
+### 5. Unauthenticated upload endpoint — RESOLVED
 
 - Location: `app/api/upload/route.ts`
-- No auth check: anyone can upload up to 40 MB of arbitrary content to public
-  Vercel Blob storage. Cost/quota abuse; no content-type checks on the legacy
-  FormData path.
-- Fix: require a valid session (and ideally board membership) for uploads;
-  validate content types.
+- Fix (2026-08-03):
+  - `getAuthUser` required — anonymous requests get 401.
+  - Board membership required — the client sends `boardId` via the
+    `clientPayload` handshake (client flow) or a `boardId` form field (legacy
+    path); the route verifies `members[user.id]` exists (403 otherwise).
+  - Content-type allowlist: PNG/JPEG/WebP/GIF images and PDFs only (415
+    otherwise). SVG is excluded (script risk). Enforced by extension on the
+    client-upload path and by MIME type on the legacy FormData path.
+  - Client plumbing: `lib/utils.ts` `uploadFileToBlob` requires `boardId`;
+    threaded through `Board`, `BoardItem`, `FocusDrawer` (incl.
+    `ImageBoardItemContent`), `StructuredBoardItemFields`,
+    `NpcBoardItemFields`, and a new `boardId` prop on `RichTextEditor`.
 
-### 6. Weak authentication hardening
+### 6. Weak authentication hardening — RESOLVED
 
-- No rate limiting on login/register/join-password endpoints → brute-force /
-  credential stuffing feasible.
-- Password minimum is 6 characters (`app/api/auth/register/route.ts:24`).
-- `verifyPassword` uses non-constant-time comparison (`lib/auth.ts:23`).
-- Session tokens never expire; password changes don't invalidate existing
-  sessions.
-- Fix: rate limiting (e.g. IP + username), stronger password policy, timing-safe
-  compare, session expiry/rotation, revoke sessions on password change.
+- Location: `app/api/auth/login/route.ts`, `app/api/auth/register/route.ts`,
+  `app/api/boards/[boardId]/join/route.ts`,
+  `app/api/auth/change-password/route.ts`, `lib/auth.ts`, `lib/rateLimit.ts`
+- Fix (2026-08-03):
+  - Rate limiting: in-memory fixed-window limiter (`lib/rateLimit.ts`) on
+    login (10/15 min per IP+username, 30/15 min per IP), register (5/hour per
+    IP), join password (10/15 min per IP+user), and change-password (10/15
+    min per IP+user). Per-instance semantics on serverless; limits overridable
+    via env (`LOGIN_RATE_LIMIT`, `LOGIN_RATE_LIMIT_PER_IP`,
+    `REGISTER_RATE_LIMIT`, `JOIN_RATE_LIMIT`, `PASSWORD_CHANGE_RATE_LIMIT`).
+  - Password policy: minimum raised 6 → 8 (max 128) in register and
+    change-password, plus client UI.
+  - Constant-time compare: `verifyPassword` uses `crypto.timingSafeEqual`;
+    login runs a dummy scrypt when the username is unknown so enumeration via
+    timing is infeasible.
+  - Session expiry: `sessions.expires_at` column (30-day sliding window —
+    `getAuthUser` slides past half-life, login/register prune expired rows).
+  - Password change revokes all other sessions and reissues a fresh token for
+    the account owner.
 
 ## Verified OK
 
@@ -119,3 +137,17 @@ stored-XSS path that defeats the auth system entirely.
 3. High #3 — server-side comment attribution/merging.
 4. High #4 — force owner on new items.
 5. Medium #5, #6 — auth hardening.
+
+**Status (2026-08-03): all of the above are resolved.**
+
+- Critical #1 (IDOR account deletion) and #2 (stored XSS / session theft):
+  fixed in commits `a434874` (sanitize + HttpOnly cookie) and `cb6d92a`
+  (ownership/comment merging); `sanitize-html`/`dompurify` are in
+  `package.json`, the session rides `dnd_session` HttpOnly cookie, and board
+  deletion is intersected with memberships in `lib/accountDeletion.ts`.
+- High #3/#4: server-side comment merge with session-stamped attribution and
+  forced ownership on new items (`lib/fieldVisibility.ts`).
+- Medium #5/#6: see above — uploads are session + membership gated with a MIME
+  allowlist; auth endpoints are rate limited with timing-safe password
+  compares, 8-char minimum, and 30-day sliding sessions revoked on password
+  change.

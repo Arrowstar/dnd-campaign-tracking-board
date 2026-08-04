@@ -444,7 +444,7 @@ export default function FocusDrawer({
                   onScrollToItem={onScrollToItem}
                 />
               ) : item.type === 'image' ? (
-                <ImageBoardItemContent item={item} canEdit={canEdit} onUpdate={onUpdate} />
+                <ImageBoardItemContent item={item} canEdit={canEdit} onUpdate={onUpdate} boardId={user.boardId} />
               ) : canEdit ? (
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Content</label>
@@ -454,6 +454,7 @@ export default function FocusDrawer({
                     placeholder={`Enter ${item.type} details...`}
                     isLight={true}
                     className="w-full"
+                    boardId={user.boardId}
                   />
                 </div>
               ) : (
@@ -588,6 +589,7 @@ export default function FocusDrawer({
                       isLight={true}
                       className="w-full"
                       mentions={mentionableMembers}
+                      boardId={user.boardId}
                     />
                     <div className="flex justify-end gap-2">
                       <button
@@ -1250,10 +1252,12 @@ function ImageBoardItemContent({
   item,
   canEdit,
   onUpdate,
+  boardId,
 }: {
   item: BoardItemType;
   canEdit: boolean;
   onUpdate: (item: BoardItemType) => void;
+  boardId: string;
 }) {
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlInputText, setUrlInputText] = useState(item.content?.startsWith('data:') ? '' : item.content || '');
@@ -1279,6 +1283,7 @@ function ImageBoardItemContent({
     setUpload({ label: file.name || 'Image', percent: 0, error: null });
     try {
       const imageUrl = await uploadFileToBlob(file, {
+        boardId,
         onProgress: (percent) => setUpload(prev => (prev ? { ...prev, percent } : prev)),
       });
       onUpdate({ ...item, content: imageUrl });
@@ -1301,6 +1306,7 @@ function ImageBoardItemContent({
       setUpload({ label: file.name || 'Image', percent: 0, error: null });
       try {
         const imageUrl = await uploadFileToBlob(file, {
+          boardId,
           onProgress: (percent) => setUpload(prev => (prev ? { ...prev, percent } : prev)),
         });
         onUpdate({ ...item, content: imageUrl });

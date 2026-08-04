@@ -1089,6 +1089,7 @@ export default function Board({ boardId }: { boardId: string }) {
       setCanvasUpload({ x: pillX, y: pillY, label: file.name || 'Image', percent: 0, error: null });
       try {
         const imageUrl = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => {
             setCanvasUpload(prev => (prev ? { ...prev, percent } : prev));
           },

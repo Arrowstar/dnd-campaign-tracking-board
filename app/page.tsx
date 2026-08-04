@@ -622,7 +622,7 @@ function AuthScreen({
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder={authTab === 'register' ? 'At least 6 characters' : ''}
+                placeholder={authTab === 'register' ? 'At least 8 characters' : ''}
                 required
                 className="auth-input"
               />

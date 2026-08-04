@@ -342,6 +342,7 @@ export default function StructuredBoardItemFields({
     setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
     try {
       const url = await uploadFileToBlob(file, {
+        boardId: user.boardId,
         onProgress: (percent) => setFieldProgress(fieldId, { percent }),
       });
       handleUpdateField(fieldId, { imageUrl: url });
@@ -373,6 +374,7 @@ export default function StructuredBoardItemFields({
       setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
       try {
         const url = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => setFieldProgress(fieldId, { percent }),
         });
         handleUpdateField(fieldId, { imageUrl: url });
@@ -405,6 +407,7 @@ export default function StructuredBoardItemFields({
       const file = fileList[i];
       try {
         const url = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => {
             const overall = Math.min(99, Math.round(((completedBytes + (percent / 100) * file.size) / totalBytes) * 100));
             setFieldProgress(fieldId, {
@@ -1184,6 +1187,7 @@ export default function StructuredBoardItemFields({
             isLight={isLight}
             compact={false}
             className="w-full"
+            boardId={user.boardId}
           />
           <div className="flex justify-end pt-1">
             <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setEditingFieldId(null); }} className="px-2.5 py-1 bg-[#2C2824] hover:bg-[#423D38] text-white text-[11px] font-bold rounded flex items-center gap-1 cursor-pointer transition-colors shadow-sm">

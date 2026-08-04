@@ -44,6 +44,12 @@ export async function ensureSchema(): Promise<void> {
     );
   `;
 
+  // Security-Audit.md medium #6 — sessions expire (30 days, sliding). Rows
+  // created before this column existed keep working; `getAuthUser` backfills
+  // their expiry on first use, and login/register prune the expired ones.
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE`;
+  await sql`CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions (expires_at)`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS boards (
       id TEXT PRIMARY KEY,

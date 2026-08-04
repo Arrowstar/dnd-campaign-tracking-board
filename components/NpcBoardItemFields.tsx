@@ -309,6 +309,7 @@ export default function NpcBoardItemFields({
     setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
     try {
       const url = await uploadFileToBlob(file, {
+        boardId: user.boardId,
         onProgress: (percent) => setFieldProgress(fieldId, { percent }),
       });
       handleUpdateField(fieldId, { imageUrl: url });
@@ -340,6 +341,7 @@ export default function NpcBoardItemFields({
       setFieldProgress(fieldId, { label: file.name || 'Image', percent: 0, error: null });
       try {
         const url = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => setFieldProgress(fieldId, { percent }),
         });
         handleUpdateField(fieldId, { imageUrl: url });
@@ -373,6 +375,7 @@ export default function NpcBoardItemFields({
       const file = fileList[i];
       try {
         const url = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => {
             const overall = Math.min(99, Math.round(((completedBytes + (percent / 100) * file.size) / totalBytes) * 100));
             setFieldProgress(fieldId, {
@@ -723,6 +726,7 @@ export default function NpcBoardItemFields({
                 isLight={isLight}
                 compact={false}
                 className="w-full"
+                boardId={user.boardId}
               />
               <div className="flex justify-end pt-1">
                 <button
@@ -936,6 +940,7 @@ export default function NpcBoardItemFields({
                           isLight={isLight}
                           compact={false}
                           className="w-full"
+                          boardId={user.boardId}
                         />
                         <div className="flex justify-end pt-1">
                           <button

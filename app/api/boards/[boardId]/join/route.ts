@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser, verifyPassword } from '@/lib/auth';
+import { authLimited, JOIN_LIMIT, JOIN_WINDOW_MS } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -39,6 +40,11 @@ export async function POST(
     }
 
     if (board.board_password_hash) {
+      // Board-password guessing is rate-limited per IP+user (Security-Audit.md
+      // medium #6).
+      const limited = authLimited(request, `join:${user.id}`, JOIN_LIMIT, JOIN_WINDOW_MS);
+      if (limited) return limited;
+
       const { boardPassword } = (await request.json().catch(() => ({}))) as {
         boardPassword?: string;
       };

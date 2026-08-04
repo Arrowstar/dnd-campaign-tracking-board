@@ -239,6 +239,12 @@ export function fileToCompressedDataURL(file: File, maxWidth = 1920, maxHeight =
 }
 
 export interface UploadFileOptions {
+  /**
+   * The board the upload belongs to. Required — the server verifies the
+   * caller is a member of this board before issuing an upload token
+   * (Security-Audit.md medium #5).
+   */
+  boardId: string;
   /** Called periodically with the upload progress as a percentage (0–100). */
   onProgress?: (percent: number) => void;
 }
@@ -261,7 +267,7 @@ const MAX_FILE_BYTES = 40 * 1024 * 1024; // must match app/api/upload/route.ts
  * (e.g. a large PDF) into board JSON can exceed the safe save size and bloat
  * the database. Callers surface the thrown error to the user instead.
  */
-export async function uploadFileToBlob(file: File, options?: UploadFileOptions): Promise<string> {
+export async function uploadFileToBlob(file: File, options: UploadFileOptions): Promise<string> {
   if (file.size > MAX_FILE_BYTES) {
     throw new Error(
       `File is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum upload size is ${Math.round(MAX_FILE_BYTES / (1024 * 1024))} MB.`
@@ -272,6 +278,7 @@ export async function uploadFileToBlob(file: File, options?: UploadFileOptions):
     access: 'public',
     handleUploadUrl: '/api/upload',
     contentType: file.type || undefined,
+    clientPayload: JSON.stringify({ boardId: options.boardId }),
     onUploadProgress: (event) => {
       if (options?.onProgress) {
         options.onProgress(Math.max(0, Math.min(100, Math.round(event.percentage ?? 0))));

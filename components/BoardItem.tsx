@@ -953,6 +953,7 @@ export default memo(function BoardItem({
       setCardUpload({ label: file.name || 'Image', percent: 0, error: null });
       try {
         const imageUrl = await uploadFileToBlob(file, {
+          boardId: user.boardId,
           onProgress: (percent) => setCardUpload(prev => (prev ? { ...prev, percent } : prev)),
         });
         if (item.type === 'image') {
