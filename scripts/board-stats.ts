@@ -21,7 +21,8 @@ async function main() {
   console.log(`Boards: ${boardCount[0].count}  ·  Sessions: ${sessionCount[0].count}\n`);
 
   const boards = await sql`
-    SELECT id, octet_length(tabs::text) AS bytes, jsonb_object_length(COALESCE(members, '{}'::jsonb)) AS member_count
+    SELECT id, octet_length(tabs::text) AS bytes,
+      (SELECT count(*) FROM jsonb_object_keys(COALESCE(members, '{}'::jsonb))) AS member_count
     FROM boards ORDER BY bytes DESC LIMIT 20
   `;
 
