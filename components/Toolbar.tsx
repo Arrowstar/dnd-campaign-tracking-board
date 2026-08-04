@@ -10,12 +10,13 @@ import {
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Check, KeyRound, Keyboard,
   Undo2, Redo2, Search
 } from 'lucide-react';
-import { 
+import {
   ANNOTATION_COLOR_PRESETS, 
   ANNOTATION_STROKE_WIDTHS, 
   ANNOTATION_FONT_FAMILIES, 
   ANNOTATION_FONT_SIZES 
 } from '@/lib/annotationUtils';
+import { useFitText } from '@/lib/useFitText';
 
 export const ARROW_COLOR_PRESETS = [
   { name: 'Slate Grey', hex: '#9CA3AF' },
@@ -122,6 +123,8 @@ export default function Toolbar({
   const [showAnnSettings, setShowAnnSettings] = useState(false);
   const [activeTabSetting, setActiveTabSetting] = useState<'stroke' | 'fill' | 'font'>('stroke');
 
+  const { ref: boardTitleRef, fontSize: boardTitleFontSize } = useFitText<HTMLHeadingElement>();
+
   const annTools = [
     { id: null, label: 'Select / Pointer', Icon: MousePointer },
     { id: 'ann_line', label: 'Draw Line', Icon: Minus },
@@ -140,17 +143,24 @@ export default function Toolbar({
   return (
     <div className="relative">
       <div className="h-16 bg-[#2C2824] border-b border-[#B58D3D] flex items-center justify-between px-4 z-50 flex-shrink-0 relative">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={handleLeaveBoard}
-            className="w-10 h-10 bg-[#B58D3D] hover:bg-[#96722E] rounded-lg flex items-center justify-center font-serif text-2xl font-bold italic shadow-inner text-[#E0D8D0] transition-colors cursor-pointer"
+            className="w-10 h-10 bg-[#B58D3D] hover:bg-[#96722E] rounded-lg flex items-center justify-center font-serif text-2xl font-bold italic shadow-inner text-[#E0D8D0] transition-colors cursor-pointer shrink-0"
             title="Return to Main Menu"
           >
             M
           </button>
-          <div>
-            <h1 className="text-lg font-bold text-[#E0D8D0] font-serif italic leading-tight">Board: {user.boardId}</h1>
+          <div className="min-w-0 overflow-hidden">
+            <h1
+              ref={boardTitleRef}
+              title={`Board: ${user.boardId}`}
+              className="text-lg font-bold text-[#E0D8D0] font-serif italic leading-tight whitespace-nowrap"
+              style={{ fontSize: `${boardTitleFontSize}px` }}
+            >
+              Board: {user.boardId}
+            </h1>
           </div>
           <div className="h-6 w-px bg-[#B58D3D] opacity-30" />
           <div className="flex items-center gap-2">
