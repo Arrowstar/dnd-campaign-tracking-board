@@ -7,7 +7,6 @@ interface TransferDmModalProps {
   isOpen: boolean;
   onClose: () => void;
   boardId: string;
-  sessionToken: string;
   onTransferred: () => void;
 }
 
@@ -22,7 +21,7 @@ interface MemberRow {
  * Feature 07 — "Transfer to…" for DM-owned boards in the lobby. The DM picks a
  * member, who becomes the new DM; the current DM then leaves the board.
  */
-export default function TransferDmModal({ isOpen, onClose, boardId, sessionToken, onTransferred }: TransferDmModalProps) {
+export default function TransferDmModal({ isOpen, onClose, boardId, onTransferred }: TransferDmModalProps) {
   const [members, setMembers] = useState<MemberRow[] | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -35,9 +34,7 @@ export default function TransferDmModal({ isOpen, onClose, boardId, sessionToken
     setError('');
     setSuccess('');
     let cancelled = false;
-    fetch(`/api/boards/${boardId}/members`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    fetch(`/api/boards/${boardId}/members`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { members?: MemberRow[] } | null) => {
         if (!cancelled && data?.members) setMembers(data.members);
@@ -48,7 +45,7 @@ export default function TransferDmModal({ isOpen, onClose, boardId, sessionToken
     return () => {
       cancelled = true;
     };
-  }, [isOpen, boardId, sessionToken]);
+  }, [isOpen, boardId]);
 
   if (!isOpen) return null;
 
@@ -62,7 +59,6 @@ export default function TransferDmModal({ isOpen, onClose, boardId, sessionToken
     try {
       const res = await fetch(`/api/boards/${boardId}/members/${target.id}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {

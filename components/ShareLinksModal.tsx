@@ -9,7 +9,6 @@ interface ShareLinksModalProps {
   isOpen: boolean;
   onClose: () => void;
   boardId: string;
-  sessionToken: string;
 }
 
 const EXPIRY_OPTIONS = [
@@ -28,7 +27,7 @@ function formatDate(iso: string): string {
  * optional expiry, copy the share URL, revoke individually. The full URL is
  * built at copy time from window.location.origin so it works in dev and prod.
  */
-export default function ShareLinksModal({ isOpen, onClose, boardId, sessionToken }: ShareLinksModalProps) {
+export default function ShareLinksModal({ isOpen, onClose, boardId }: ShareLinksModalProps) {
   const [shares, setShares] = useState<ShareLink[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,9 +43,7 @@ export default function ShareLinksModal({ isOpen, onClose, boardId, sessionToken
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/boards/${boardId}/shares`, {
-        headers: { Authorization: `Bearer ${sessionToken}` },
-      });
+      const res = await fetch(`/api/boards/${boardId}/shares`);
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setError(data?.error || 'Failed to load share links.');
@@ -59,7 +56,7 @@ export default function ShareLinksModal({ isOpen, onClose, boardId, sessionToken
     } finally {
       setLoading(false);
     }
-  }, [boardId, sessionToken]);
+  }, [boardId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -89,7 +86,7 @@ export default function ShareLinksModal({ isOpen, onClose, boardId, sessionToken
     try {
       const res = await fetch(`/api/boards/${boardId}/shares`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           label: label.trim() || undefined,
           expiresInDays: expiresInDays === '' ? null : Number(expiresInDays),
@@ -119,7 +116,6 @@ export default function ShareLinksModal({ isOpen, onClose, boardId, sessionToken
     try {
       const res = await fetch(`/api/boards/${boardId}/shares/${token}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${sessionToken}` },
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);

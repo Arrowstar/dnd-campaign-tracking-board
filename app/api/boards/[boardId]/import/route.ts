@@ -7,6 +7,7 @@ import {
   validateBoardId,
   MAX_IMPORT_BYTES,
 } from '@/lib/exportImport';
+import { sanitizeTabsForSave } from '@/lib/sanitize.server';
 
 export const runtime = 'nodejs';
 
@@ -95,15 +96,19 @@ export async function POST(
       boardPasswordHash ? { hash: boardPasswordHash, salt: boardPasswordSalt! } : null
     );
 
+    // Imported files are attacker-controlled JSON — scrub every rich-text
+    // slot server-side before it enters the DB (Security-Audit.md #2).
+    const safeRow = { ...row, tabs: sanitizeTabsForSave(row.tabs) };
+
     await sql`
       INSERT INTO boards (id, board_password_hash, board_password_salt, members, tabs, settings)
       VALUES (
-        ${row.id},
-        ${row.board_password_hash},
-        ${row.board_password_salt},
-        ${JSON.stringify(row.members)}::jsonb,
-        ${JSON.stringify(row.tabs)}::jsonb,
-        ${JSON.stringify(row.settings)}::jsonb
+        ${safeRow.id},
+        ${safeRow.board_password_hash},
+        ${safeRow.board_password_salt},
+        ${JSON.stringify(safeRow.members)}::jsonb,
+        ${JSON.stringify(safeRow.tabs)}::jsonb,
+        ${JSON.stringify(safeRow.settings)}::jsonb
       )
     `;
 

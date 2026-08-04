@@ -250,10 +250,8 @@ function validateItem(item: unknown): string | null {
 // never call this from a server route.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function downloadBoardExport(boardId: string, sessionToken: string): Promise<string | null> {
-  const res = await fetch(`/api/boards/${boardId}/export`, {
-    headers: { Authorization: `Bearer ${sessionToken}` },
-  });
+export async function downloadBoardExport(boardId: string): Promise<string | null> {
+  const res = await fetch(`/api/boards/${boardId}/export`);
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     return data?.error || 'Failed to export board.';

@@ -140,3 +140,13 @@ export function summarizeDeletion(
 export function findBlockingBoards(dmBoards: DmBoardSummary[], deleteBoardIds: string[]): DmBoardSummary[] {
   return dmBoards.filter((b) => b.hasOthers && !deleteBoardIds.includes(b.boardId));
 }
+
+/**
+ * Reduces a client-supplied list of board ids to the ones the caller is
+ * actually a member of. Account deletion must never delete a board the user
+ * does not belong to (IDOR guard — see Security-Audit.md critical #1).
+ */
+export function intersectMemberBoards(boardIds: string[], memberships: { id: string }[]): string[] {
+  const owned = new Set(memberships.map((b) => b.id));
+  return [...new Set(boardIds)].filter((id) => owned.has(id));
+}

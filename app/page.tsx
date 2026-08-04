@@ -12,7 +12,6 @@ import TransferDmModal from '@/components/TransferDmModal';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SessionData {
-  sessionToken: string;
   userId: string;
   displayName: string;
 }
@@ -67,25 +66,14 @@ export default function Home() {
   const [isImporting, setIsImporting] = useState(false);
 
   // ── Session check on mount ─────────────────────────────────────────────────
+  // The session lives in an HttpOnly cookie (set by /api/auth/login|register),
+  // so no token storage is needed — just ask /api/auth/me.
   useEffect(() => {
-    const raw = localStorage.getItem('dnd_session');
-    if (!raw) { // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsLoadingSession(false); return; }
-
-    let parsed: { sessionToken?: string } = {};
-    try { parsed = JSON.parse(raw); } catch {  
-      setIsLoadingSession(false); return; }
-
-    if (!parsed.sessionToken) {  
-      setIsLoadingSession(false); return; }
-
-    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${parsed.sessionToken}` } })
+    fetch('/api/auth/me', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.user) {
-          setSession({ sessionToken: parsed.sessionToken!, userId: data.user.id, displayName: data.user.displayName });
-        } else {
-          localStorage.removeItem('dnd_session');
+          setSession({ userId: data.user.id, displayName: data.user.displayName });
         }
       })
       .catch(() => {})
@@ -96,7 +84,7 @@ export default function Home() {
   const loadBoards = useCallback(() => {
     if (!session) return;
     setIsLoadingBoards(true);
-    fetch('/api/auth/my-boards', { headers: { Authorization: `Bearer ${session.sessionToken}` } })
+    fetch('/api/auth/my-boards', { cache: 'no-store' })
       .then(r => r.json())
       .then(data => setMyBoards(data.boards || []))
       .catch(() => {})
@@ -135,12 +123,12 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) { setAuthError(data.error || 'Something went wrong.'); return; }
+      // The session is an HttpOnly cookie set by the server — nothing to
+      // store (Security-Audit.md critical #2).
       const s: SessionData = {
-        sessionToken: data.sessionToken,
         userId: data.user.id,
         displayName: data.user.displayName,
       };
-      localStorage.setItem('dnd_session', JSON.stringify({ sessionToken: s.sessionToken }));
       setSession(s);
     } catch {
       setAuthError('Network error. Please try again.');
@@ -159,7 +147,7 @@ export default function Home() {
     try {
       const res = await fetch(`/api/boards/${cleanId}/join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.sessionToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ boardPassword: joinBoardPassword }),
       });
       const data = await res.json();
@@ -181,7 +169,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/boards', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.sessionToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           boardId: createBoardId.trim().toLowerCase(),
           boardPassword: createBoardPassword || undefined,
@@ -225,7 +213,7 @@ export default function Home() {
       const sourceBoardId = typeof parsed.board?.id === 'string' ? parsed.board.id : 'import';
       const res = await fetch(`/api/boards/${sourceBoardId}/import`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.sessionToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...parsed,
           newBoardId: importBoardId.trim().toLowerCase() || undefined,
@@ -257,12 +245,9 @@ export default function Home() {
   // ── Logout ─────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     if (session) {
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.sessionToken}` },
-      }).catch(() => {});
+      // Server deletes the session row and clears the HttpOnly cookie.
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
-    localStorage.removeItem('dnd_session');
     setSession(null);
     setMyBoards([]);
     setLobbyView('boards');
@@ -531,7 +516,6 @@ export default function Home() {
       <UserSettingsModal
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
-        sessionToken={session.sessionToken}
         username={session.displayName}
         onAccountDeleted={() => {
           setShowSettingsModal(false);
@@ -544,7 +528,6 @@ export default function Home() {
         isOpen={transferBoard !== null}
         onClose={() => setTransferBoard(null)}
         boardId={transferBoard?.boardId ?? ''}
-        sessionToken={session.sessionToken}
         onTransferred={() => {
           setTransferBoard(null);
           loadBoards();

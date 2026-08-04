@@ -49,6 +49,7 @@ import {
   ArrowRightToLine,
 } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
+import { sanitizeRichText } from '@/lib/sanitize';
 import UploadProgress from './UploadProgress';
 import { MentionableMember } from './MentionAutocomplete';
 import { createMentionSuggestion } from '@/lib/mentionSuggestion';
@@ -628,11 +629,14 @@ export function RichTextDisplay({ content, className = '' }: { content: string; 
   // Check if content string contains HTML tags
   const hasHtml = /<[a-z][\s\S]*>/i.test(content);
   const formattedHtml = hasHtml ? content : content.replace(/\n/g, '<br />');
+  // Defense-in-depth: DOMPurify allowlist before injecting, even though the
+  // server scrubs on write (covers legacy/imported content — Security-Audit.md #2).
+  const safeHtml = sanitizeRichText(formattedHtml);
 
   return (
     <div
       className={`rich-text-content break-words ${className}`}
-      dangerouslySetInnerHTML={{ __html: formattedHtml }}
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
     />
   );
 }
@@ -662,10 +666,11 @@ function getTextAlignFromAttrs(attrs: string): string | null {
 export function flattenRichTextForPreview(html: string): string {
   if (!html) return '';
 
-  let s = html;
-  // Drop scripts/styles entirely.
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
+  // Allowlist-sanitize first (DOMPurify): strips scripts, event handlers,
+  // javascript: URLs, iframes/svg/object before any of the transforms below
+  // run (Security-Audit.md #2). The rt-preview-* wrappers are generated AFTER
+  // this point, so the sanitizer never sees them.
+  let s = sanitizeRichText(html);
   // Normalize <br> variants.
   s = s.replace(/<br\s*\/?>/gi, '\u0000'); // sentinel: survives trimming, replaced below
   // Block boundaries → line breaks (inline content inside is kept), with

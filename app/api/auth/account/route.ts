@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth';
+import { getAuthUser, clearSessionCookie } from '@/lib/auth';
 import { getSql, ensureSchema } from '@/lib/db';
 import {
   reassignItemsToDm,
   findBoardDm,
   findBlockingBoards,
+  intersectMemberBoards,
   MemberEntry,
 } from '@/lib/accountDeletion';
 
@@ -65,6 +66,9 @@ export async function DELETE(request: NextRequest) {
     const boards = rows as BoardRow[];
 
     const memberships = boards.filter((b) => b.members?.[user.id]);
+    // IDOR guard: only boards the caller actually belongs to may be deleted
+    // (Security-Audit.md critical #1). Any other id is silently dropped.
+    const requestedDeletions = intersectMemberBoards(deleteBoardIds, memberships);
     const dmBoards = memberships.filter((b) => b.members[user.id].role === 'dm');
 
     // DM-run boards with other members that aren't being deleted block the
@@ -74,7 +78,7 @@ export async function DELETE(request: NextRequest) {
         const memberCount = Object.keys(b.members || {}).length;
         return { boardId: b.id, memberCount, otherMembers: memberCount - 1, hasOthers: memberCount > 1 };
       }),
-      deleteBoardIds
+      requestedDeletions
     );
     if (blocking.length > 0) {
       return NextResponse.json(
@@ -88,7 +92,9 @@ export async function DELETE(request: NextRequest) {
 
     // Deleted outright: the checked boards + DM boards where the user is the
     // only member (a board with zero members is unreachable dead data).
-    const toDelete = new Set<string>(deleteBoardIds);
+    // `requestedDeletions` was already intersected with the caller's
+    // memberships above, so this set can only contain their own boards.
+    const toDelete = new Set<string>(requestedDeletions);
     for (const b of dmBoards) {
       const memberCount = Object.keys(b.members || {}).length;
       if (memberCount <= 1) toDelete.add(b.id);
@@ -131,7 +137,7 @@ export async function DELETE(request: NextRequest) {
       tx`UPDATE users SET deleted_at = NOW(), username = 'deleted_' || id WHERE id = ${user.id}`,
     ]);
 
-    return NextResponse.json({ success: true });
+    return clearSessionCookie(NextResponse.json({ success: true }));
   } catch (err) {
     console.error('Delete account error:', err);
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });

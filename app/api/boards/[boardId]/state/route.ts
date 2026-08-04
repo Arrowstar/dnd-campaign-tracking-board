@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth';
 import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
 import { syncLinkTitles } from '@/lib/crossref';
 import { mergeTagDefs } from '@/lib/tags';
+import { sanitizeTabsForSave } from '@/lib/sanitize.server';
 import {
   diffComments,
   planMentionNotifications,
@@ -82,6 +83,9 @@ export async function POST(
       const merged = mergeTabsForSave(storedTabs, tabs, { id: user.id, role: member.role }, memberIds);
       // Keep link-token title snapshots in sync with item titles.
       const synced = syncLinkTitles(merged);
+      // Allowlist-sanitize every rich-text slot (item content, field text
+      // values, comments) before it can reach the DB (Security-Audit.md #2).
+      const sanitized = sanitizeTabsForSave(synced);
 
       // Feature 08 — @mention notifications. This is the single comment write
       // path, so detect mentions here (never trust the client). Covers the
@@ -94,13 +98,13 @@ export async function POST(
       for (const r of memberUsernameRows) {
         if (storedMembers[r.id]) memberUsernameToId[normalizeUsername(r.username)] = r.id;
       }
-      const { newComments, removedCommentIds } = diffComments(storedTabs, synced);
+      const { newComments, removedCommentIds } = diffComments(storedTabs, sanitized);
       const plan = planMentionNotifications(boardId, memberUsernameToId, newComments);
       // Deleted comments take their notifications with them (dead-link guard).
       await applyMentionNotifications(sql, boardId, plan, removedCommentIds);
 
       const updated = await sql`
-        UPDATE boards SET tabs = ${JSON.stringify(synced)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
+        UPDATE boards SET tabs = ${JSON.stringify(sanitized)}::jsonb, updated_at = NOW() WHERE id = ${boardId}
         RETURNING updated_at
       `;
       updatedAt = updated[0]?.updated_at ?? null;

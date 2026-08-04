@@ -60,7 +60,7 @@ Today the app has **no way to remove anything at the account level**: boards liv
 
 *Step 2 — Deletion*:
 - `DELETE /api/auth/account` with `{ confirmed: true, deleteBoardIds: string[] }`.
-- On success: clear `localStorage['dnd_session']`, then the lobby shows the auth screen (existing session-loss path).
+- On success: the server deletes the user's sessions and clears the HttpOnly session cookie, then the lobby shows the auth screen (existing session-loss path).
 
 ### 3. The DM-role blocker (no transfer feature yet)
 

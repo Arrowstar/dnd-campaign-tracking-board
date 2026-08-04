@@ -5,8 +5,6 @@ export type User = {
   name: string;
   role: UserRole;
   boardId: string;
-  /** Server-issued session token — stored in localStorage as `dnd_session` */
-  sessionToken: string;
 };
 
 export type ItemType = 'character' | 'npc' | 'faction' | 'event' | 'location' | 'session' | 'quest' | 'note' | 'rule' | 'loot' | 'downtime' | 'image';

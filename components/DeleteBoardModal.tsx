@@ -8,7 +8,6 @@ interface DeleteBoardModalProps {
   isOpen: boolean;
   onClose: () => void;
   boardId: string;
-  sessionToken: string;
 }
 
 interface MemberRow {
@@ -23,7 +22,7 @@ interface MemberRow {
  * before the destructive button enables (confirm-by-typed-id; board ids are
  * `[a-z0-9-]` slugs, so comparison is case-insensitive by construction).
  */
-export default function DeleteBoardModal({ isOpen, onClose, boardId, sessionToken }: DeleteBoardModalProps) {
+export default function DeleteBoardModal({ isOpen, onClose, boardId }: DeleteBoardModalProps) {
   const [typedId, setTypedId] = useState('');
   const [otherMembers, setOtherMembers] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -39,9 +38,7 @@ export default function DeleteBoardModal({ isOpen, onClose, boardId, sessionToke
     setExportMsg('');
     setOtherMembers(null);
     let cancelled = false;
-    fetch(`/api/boards/${boardId}/members`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    fetch(`/api/boards/${boardId}/members`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { members?: MemberRow[] } | null) => {
         if (cancelled || !data?.members) return;
@@ -51,7 +48,7 @@ export default function DeleteBoardModal({ isOpen, onClose, boardId, sessionToke
     return () => {
       cancelled = true;
     };
-  }, [isOpen, boardId, sessionToken]);
+  }, [isOpen, boardId]);
 
   if (!isOpen) return null;
 
@@ -62,7 +59,7 @@ export default function DeleteBoardModal({ isOpen, onClose, boardId, sessionToke
     setError('');
     setIsExporting(true);
     try {
-      const err = await downloadBoardExport(boardId, sessionToken);
+      const err = await downloadBoardExport(boardId);
       setExportMsg(err ? '' : 'Backup downloaded.');
       if (err) setError(err);
     } catch {
@@ -79,10 +76,7 @@ export default function DeleteBoardModal({ isOpen, onClose, boardId, sessionToke
     try {
       const res = await fetch(`/api/boards/${boardId}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ boardId }),
       });
       const data = await res.json().catch(() => null);

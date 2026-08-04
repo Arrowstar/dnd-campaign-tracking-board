@@ -96,9 +96,7 @@ export default function Board({ boardId }: { boardId: string }) {
 
   useEffect(() => {
     if (!user) return;
-    fetch(`/api/boards/${boardId}/members`, {
-      headers: { Authorization: `Bearer ${user.sessionToken}` },
-    })
+    fetch(`/api/boards/${boardId}/members`)
       .then(res => res.json())
       .then(data => {
         if (data.members) {
@@ -121,9 +119,7 @@ export default function Board({ boardId }: { boardId: string }) {
   const refreshNotifications = useCallback(async () => {
     if (!user) return;
     try {
-      const res = await fetch(`/api/boards/${boardId}/notifications`, {
-        headers: { Authorization: `Bearer ${user.sessionToken}` },
-      });
+      const res = await fetch(`/api/boards/${boardId}/notifications`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.notifications)) setNotifications(data.notifications);
@@ -142,17 +138,14 @@ export default function Board({ boardId }: { boardId: string }) {
     try {
       const res = await fetch(`/api/boards/${boardId}/notifications/read`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user?.sessionToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (res.ok) refreshNotifications();
     } catch (err) {
       console.error('Failed to mark notifications read:', err);
     }
-  }, [boardId, user?.sessionToken, refreshNotifications]);
+  }, [boardId, refreshNotifications]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -460,22 +453,10 @@ export default function Board({ boardId }: { boardId: string }) {
   }, [items, user, getItemRectInContainer]);
 
   useEffect(() => {
-    // Read the session token written by the lobby on login
-    let sessionToken: string | null = null;
-    try {
-      const raw = localStorage.getItem('dnd_session');
-      if (raw) sessionToken = JSON.parse(raw).sessionToken ?? null;
-    } catch { /* ignore */ }
-
-    if (!sessionToken) {
-      window.location.href = '/';
-      return;
-    }
-
-    // Single call: validates session + membership + returns board state
-    fetch(`/api/boards/${boardId}/state`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    // Single call: validates the HttpOnly session cookie + membership and
+    // returns board state. No token is stored client-side (Security-Audit.md
+    // critical #2) — 401/403 below means "no session / not a member".
+    fetch(`/api/boards/${boardId}/state`)
       .then(res => {
         if (res.status === 401 || res.status === 403) {
           window.location.href = '/';
@@ -490,13 +471,12 @@ export default function Board({ boardId }: { boardId: string }) {
       })
       .then((data: { userId: string; username: string; role: 'dm' | 'player'; tabs: any[]; settings?: BoardSettings; updatedAt?: string | null } | null) => {
         if (!data) return;
-         
+
         setUser({
           id: data.userId,
           name: data.username,
           role: data.role,
           boardId,
-          sessionToken: sessionToken!,
         });
         if (typeof data.updatedAt === 'string' && data.updatedAt) {
           appliedRevisionRef.current = data.updatedAt;
@@ -552,7 +532,7 @@ export default function Board({ boardId }: { boardId: string }) {
   // scrubbed) state is only downloaded when it did. Also covers kick
   // detection — a 403 on the revision endpoint means we're no longer a member.
   useEffect(() => {
-    if (!user || !user.sessionToken) return;
+    if (!user) return;
 
     let cancelled = false;
     let inFlight = false;
@@ -579,9 +559,7 @@ export default function Board({ boardId }: { boardId: string }) {
 
     const applyFullState = async (): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/boards/${boardId}/state`, {
-          headers: { Authorization: `Bearer ${user.sessionToken}` },
-        });
+        const res = await fetch(`/api/boards/${boardId}/state`);
         if (res.status === 401) {
           handleSessionLost();
           return false;
@@ -617,9 +595,7 @@ export default function Board({ boardId }: { boardId: string }) {
       if (inFlight || cancelled) return;
       inFlight = true;
       try {
-        const res = await fetch(`/api/boards/${boardId}/revision`, {
-          headers: { Authorization: `Bearer ${user.sessionToken}` },
-        });
+        const res = await fetch(`/api/boards/${boardId}/revision`);
         if (res.status === 401) {
           handleSessionLost();
           return;
@@ -679,7 +655,7 @@ export default function Board({ boardId }: { boardId: string }) {
 
   const persistBoardState = useCallback(
     (updatedTabs: BoardTab[]) => {
-      if (!user?.sessionToken) return;
+      if (!user) return;
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         setSaveStatus('saving');
         const body = JSON.stringify({ tabs: updatedTabs });
@@ -695,10 +671,7 @@ export default function Board({ boardId }: { boardId: string }) {
         try {
           const res = await fetch(`/api/boards/${boardId}/state`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${user.sessionToken}`,
-            },
+            headers: { 'Content-Type': 'application/json' },
             body,
           });
           if (!res.ok) {
@@ -737,7 +710,7 @@ export default function Board({ boardId }: { boardId: string }) {
         }
       });
     },
-    [boardId, user?.sessionToken, refreshNotifications]
+    [boardId, user, refreshNotifications]
   );
 
   const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string) => {
@@ -1330,16 +1303,13 @@ export default function Board({ boardId }: { boardId: string }) {
   /** Persist a DM settings change (tag definitions). Players never reach this. */
   const handleUpdateSettings = useCallback((next: BoardSettings) => {
     setBoardSettings(next);
-    if (!user?.sessionToken) return;
+    if (!user) return;
     fetch(`/api/boards/${boardId}/state`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${user.sessionToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ settings: { tagDefs: next.tagDefs } }),
     }).catch(err => console.error('Error saving tag definitions:', err));
-  }, [boardId, user?.sessionToken]);
+  }, [boardId, user]);
 
   // Bulk actions (Feature 02): applied only to items the user may edit —
   // the server merge would silently drop the rest anyway. One saveState call
@@ -2429,14 +2399,12 @@ export default function Board({ boardId }: { boardId: string }) {
             <UserSettingsModal
               isOpen={showUserSettingsModal}
               onClose={() => setShowUserSettingsModal(false)}
-              sessionToken={user.sessionToken}
               username={user.name}
             />
             <MemberManagementModal
               isOpen={showMembersModal}
               onClose={() => setShowMembersModal(false)}
               boardId={boardId}
-              sessionToken={user.sessionToken}
               currentUserId={user.id}
               currentUserRole={user.role}
             />
@@ -2459,7 +2427,6 @@ export default function Board({ boardId }: { boardId: string }) {
                 isOpen
                 onClose={() => setShowBoardSettingsModal(false)}
                 boardId={boardId}
-                sessionToken={user.sessionToken}
                 settings={boardSettings}
                 onPreviewChange={setBoardSettings}
               />

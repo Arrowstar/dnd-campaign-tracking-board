@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
-import { hashPassword, generateToken } from '@/lib/auth';
+import { hashPassword, generateToken, setSessionCookie } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -48,10 +48,15 @@ export async function POST(request: NextRequest) {
     const sessionToken = generateToken();
     await sql`INSERT INTO sessions (token, user_id) VALUES (${sessionToken}, ${userId})`;
 
-    return NextResponse.json({
-      sessionToken,
-      user: { id: userId, username: lowerUsername, displayName },
-    });
+    // Session rides an HttpOnly cookie — never exposed to JS (Security-Audit.md
+    // critical #2). The body still carries the token for transitional clients.
+    return setSessionCookie(
+      NextResponse.json({
+        sessionToken,
+        user: { id: userId, username: lowerUsername, displayName },
+      }),
+      sessionToken
+    );
   } catch (err) {
     console.error('Register error:', err);
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });

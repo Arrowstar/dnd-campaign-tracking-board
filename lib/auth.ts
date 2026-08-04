@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { promisify } from 'util';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from './db';
 
 const scryptAsync = promisify<string | Buffer, string | Buffer, number, Buffer>(
@@ -11,6 +11,34 @@ const scryptAsync = promisify<string | Buffer, string | Buffer, number, Buffer>(
     cb: (err: Error | null, derivedKey: Buffer) => void
   ) => void
 );
+
+/**
+ * Session cookie name. The token is carried in an HttpOnly cookie (never
+ * localStorage) so injected script cannot read it (Security-Audit.md critical
+ * #2). `HttpOnly` + `SameSite=Lax` + `Secure` in production.
+ */
+export const SESSION_COOKIE = 'dnd_session';
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+  };
+}
+
+/** Attaches the session token as an HttpOnly cookie to a response. */
+export function setSessionCookie(response: NextResponse, token: string): NextResponse {
+  response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  return response;
+}
+
+/** Clears the session cookie (logout / account deletion). */
+export function clearSessionCookie(response: NextResponse): NextResponse {
+  response.cookies.set(SESSION_COOKIE, '', { ...sessionCookieOptions(), maxAge: 0 });
+  return response;
+}
 
 export async function hashPassword(password: string): Promise<{ hash: string; salt: string }> {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -35,11 +63,10 @@ export interface AuthUser {
   salt: string;
 }
 
-/** Looks up the Bearer session token on the request and returns the user, or null. */
+/** Looks up the session cookie on the request and returns the user, or null. */
 export async function getAuthUser(request: NextRequest): Promise<AuthUser | null> {
-  const auth = request.headers.get('authorization');
-  if (!auth || !auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7);
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  if (!token) return null;
 
   await ensureSchema();
   const sql = getSql();

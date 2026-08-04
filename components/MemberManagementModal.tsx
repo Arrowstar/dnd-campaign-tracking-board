@@ -15,7 +15,6 @@ interface MemberManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
   boardId: string;
-  sessionToken: string;
   currentUserId: string;
   currentUserRole: 'dm' | 'player';
 }
@@ -24,7 +23,6 @@ export default function MemberManagementModal({
   isOpen,
   onClose,
   boardId,
-  sessionToken,
   currentUserId,
   currentUserRole,
 }: MemberManagementModalProps) {
@@ -36,9 +34,7 @@ export default function MemberManagementModal({
   const fetchMembers = () => {
     setIsLoading(true);
     setError('');
-    fetch(`/api/boards/${boardId}/members`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    fetch(`/api/boards/${boardId}/members`)
       .then(res => res.json())
       .then(data => {
         if (data.members) setMembers(data.members);
@@ -64,7 +60,6 @@ export default function MemberManagementModal({
     try {
       const res = await fetch(`/api/boards/${boardId}/members/${member.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${sessionToken}` },
       });
       const data = await res.json();
       if (!res.ok) {

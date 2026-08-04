@@ -4,6 +4,7 @@ import {
   findBoardDm,
   summarizeDeletion,
   findBlockingBoards,
+  intersectMemberBoards,
   DeletionSummary,
 } from './accountDeletion';
 import { BoardTab } from './types';
@@ -205,5 +206,33 @@ describe('findBlockingBoards', () => {
 
   it('never blocks solo boards', () => {
     expect(findBlockingBoards(dmBoards, []).map((b) => b.boardId)).not.toContain('solo');
+  });
+});
+
+// ─── intersectMemberBoards (IDOR guard) ──────────────────────────────────────
+
+describe('intersectMemberBoards', () => {
+  const memberships = [
+    { id: 'my-board' },
+    { id: 'my-solo-board' },
+  ];
+
+  it('keeps only ids the caller is a member of', () => {
+    expect(intersectMemberBoards(['my-board', 'victim-board', 'my-solo-board'], memberships)).toEqual([
+      'my-board',
+      'my-solo-board',
+    ]);
+  });
+
+  it('returns an empty list when nothing is owned', () => {
+    expect(intersectMemberBoards(['victim-board', 'other-board'], memberships)).toEqual([]);
+    expect(intersectMemberBoards([], memberships)).toEqual([]);
+  });
+
+  it('ignores duplicate and malformed ids', () => {
+    expect(intersectMemberBoards(['my-board', 'my-board', 'my-solo-board'], memberships)).toEqual([
+      'my-board',
+      'my-solo-board',
+    ]);
   });
 });

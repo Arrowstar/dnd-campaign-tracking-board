@@ -7,7 +7,6 @@ import { findBlockingBoards } from '@/lib/accountDeletion';
 interface DeleteAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
-  sessionToken: string;
   /** Account username — the user must type it to confirm. */
   username: string;
   onAccountDeleted: () => void;
@@ -42,7 +41,7 @@ interface DeletionSummaryPayload {
  *     On success the session is cleared locally; the lobby falls back to the
  *     auth screen.
  */
-export default function DeleteAccountModal({ isOpen, onClose, sessionToken, username, onAccountDeleted }: DeleteAccountModalProps) {
+export default function DeleteAccountModal({ isOpen, onClose, username, onAccountDeleted }: DeleteAccountModalProps) {
   const [summary, setSummary] = useState<DeletionSummaryPayload | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [typedUsername, setTypedUsername] = useState('');
@@ -57,9 +56,7 @@ export default function DeleteAccountModal({ isOpen, onClose, sessionToken, user
     setTypedUsername('');
     setError('');
     let cancelled = false;
-    fetch('/api/auth/account/deletion-summary', {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    fetch('/api/auth/account/deletion-summary')
       .then((res) => (res.ok ? res.json() : null))
       .then((data: DeletionSummaryPayload | null) => {
         if (!cancelled && data) setSummary(data);
@@ -70,7 +67,7 @@ export default function DeleteAccountModal({ isOpen, onClose, sessionToken, user
     return () => {
       cancelled = true;
     };
-  }, [isOpen, sessionToken]);
+  }, [isOpen]);
 
   const deleteBoardIds = useMemo(() => Array.from(checked), [checked]);
 
@@ -100,10 +97,7 @@ export default function DeleteAccountModal({ isOpen, onClose, sessionToken, user
     try {
       const res = await fetch('/api/auth/account', {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmed: true, deleteBoardIds }),
       });
       const data = await res.json().catch(() => null);
@@ -120,7 +114,8 @@ export default function DeleteAccountModal({ isOpen, onClose, sessionToken, user
         setIsDeleting(false);
         return;
       }
-      localStorage.removeItem('dnd_session');
+      // The server cleared the session cookie; the lobby falls back to the
+      // auth screen.
       onAccountDeleted();
     } catch {
       setError('A network error occurred. Please try again.');

@@ -25,7 +25,6 @@ const VIEWER: User = {
   name: 'Viewer',
   role: 'player',
   boardId: '',
-  sessionToken: '',
 };
 
 type ViewStatus =

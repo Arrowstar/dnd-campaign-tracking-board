@@ -7,13 +7,12 @@ import DeleteAccountModal from './DeleteAccountModal';
 interface UserSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  sessionToken: string;
   username: string;
   /** Called after the account is deleted — the lobby clears the session. */
   onAccountDeleted?: () => void;
 }
 
-export default function UserSettingsModal({ isOpen, onClose, sessionToken, username, onAccountDeleted }: UserSettingsModalProps) {
+export default function UserSettingsModal({ isOpen, onClose, username, onAccountDeleted }: UserSettingsModalProps) {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -42,10 +41,7 @@ export default function UserSettingsModal({ isOpen, onClose, sessionToken, usern
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPassword, newPassword }),
       });
 
@@ -185,7 +181,6 @@ export default function UserSettingsModal({ isOpen, onClose, sessionToken, usern
         <DeleteAccountModal
           isOpen={isDeleteOpen}
           onClose={() => setIsDeleteOpen(false)}
-          sessionToken={sessionToken}
           username={username}
           onAccountDeleted={() => {
             setIsDeleteOpen(false);

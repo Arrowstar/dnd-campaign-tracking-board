@@ -15,7 +15,6 @@ interface BoardSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   boardId: string;
-  sessionToken: string;
   /** Currently persisted settings (the baseline to revert to on cancel). */
   settings: BoardSettings;
   /** Live-apply a draft so the canvas behind the modal updates immediately. */
@@ -26,7 +25,6 @@ export default function BoardSettingsModal({
   isOpen,
   onClose,
   boardId,
-  sessionToken,
   settings,
   onPreviewChange,
 }: BoardSettingsModalProps) {
@@ -62,7 +60,7 @@ export default function BoardSettingsModal({
     setExportError('');
     setIsExporting(true);
     try {
-      const error = await downloadBoardExport(boardId, sessionToken);
+      const error = await downloadBoardExport(boardId);
       if (error) setExportError(error);
     } catch {
       setExportError('A network error occurred. Please try again.');
@@ -78,10 +76,7 @@ export default function BoardSettingsModal({
     try {
       const res = await fetch(`/api/boards/${boardId}/state`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: draft }),
       });
       const data = await res.json();
@@ -314,14 +309,12 @@ export default function BoardSettingsModal({
         isOpen={isSharesOpen}
         onClose={() => setIsSharesOpen(false)}
         boardId={boardId}
-        sessionToken={sessionToken}
       />
 
       <DeleteBoardModal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
         boardId={boardId}
-        sessionToken={sessionToken}
       />
     </div>
   );
