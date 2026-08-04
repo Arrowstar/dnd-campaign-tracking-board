@@ -28,7 +28,8 @@ import KeyboardShortcutsHelp from './KeyboardShortcutsHelp';
 import BoardSettingsModal from './BoardSettingsModal';
 import GlobalSearchModal from './GlobalSearchModal';
 import { recordRecentItem } from '@/lib/search';
-import { navigateToItem, flashItemElement, getCanvasViewport, POLL_INTERVAL_MS } from '@/lib/viewNavigation';
+import { navigateToItem, flashItemElement, getCanvasViewport } from '@/lib/viewNavigation';
+import { useBoardRealtime } from '@/lib/useBoardRealtime';
 import {
   applyPatch,
   computeDiff,
@@ -590,134 +591,193 @@ export default function Board({ boardId }: { boardId: string }) {
     return () => clearTimeout(t);
   }, [user, tabs, activeTabId, computeFitForTab]);
 
-  // Real-time sync via revision polling: a cheap revision request every few
-  // seconds tells us if the board changed elsewhere; the full (per-user
-  // scrubbed) state is only downloaded when it did. Also covers kick
-  // detection — a 403 on the revision endpoint means we're no longer a member.
-  useEffect(() => {
-    if (!user) return;
+  // ── Real-time sync (Feature 12 / Phase 3): SSE push + slow fallback poll ──
+  // The SSE stream (/events) pushes the board revision; the full per-user
+  // scrubbed state is only downloaded when it changes (the same applyFullState
+  // path the old 3 s poller used). EventSource never sees HTTP status codes,
+  // so kick/board-deletion detection stays on the slow fallback poller against
+  // the revision endpoint. Handlers are plain functions recreated every render;
+  // the hook stashes them in a ref so the stream never reconnects on state
+  // changes.
 
-    let cancelled = false;
-    let inFlight = false;
+  function isActivelyEditing(): boolean {
+    const el = document.activeElement;
+    return !!el &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable);
+  }
 
-    const isActivelyEditing = () => {
-      const el = document.activeElement;
-      return !!el &&
-        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable);
-    };
+  const handleMembershipLost = useCallback(() => {
+    alert('You have been removed from this campaign by the Dungeon Master.');
+    window.location.href = '/';
+  }, []);
 
-    const handleMembershipLost = () => {
-      alert('You have been removed from this campaign by the Dungeon Master.');
-      window.location.href = '/';
-    };
+  const handleBoardDeleted = useCallback(() => {
+    // Board gone — drop the per-user history keys for it.
+    clearHistoryForBoard(boardId);
+    alert('This board was deleted by its DM.');
+    window.location.href = '/';
+  }, [boardId]);
 
-    const handleBoardDeleted = () => {
-      // Board gone — drop the per-user history keys for it.
-      clearHistoryForBoard(boardId);
-      alert('This board was deleted by its DM.');
-      window.location.href = '/';
-    };
+  const handleSessionLost = useCallback(() => {
+    window.location.href = '/';
+  }, []);
 
-    const handleSessionLost = () => {
-      window.location.href = '/';
-    };
-
-    const applyFullState = async (): Promise<boolean> => {
-      try {
-        // Feature 12 — conditional refetch: the server answers 304 when the
-        // stored revision still matches the one we already applied, skipping
-        // the full payload.
-        const since = appliedRevisionRef.current ?? '';
-        const res = await fetch(`/api/boards/${boardId}/state?since=${encodeURIComponent(since)}`);
-        if (res.status === 401) {
-          handleSessionLost();
-          return false;
-        }
-        if (res.status === 403) {
-          handleMembershipLost();
-          return false;
-        }
-        if (res.status === 404) {
-          handleBoardDeleted();
-          return false;
-        }
-        if (res.status === 304) return true;
-        if (!res.ok) return false;
-        const data = (await res.json()) as { tabs: BoardTab[] | undefined; settings?: BoardSettings };
-        if (cancelled || !data.tabs || !Array.isArray(data.tabs)) return false;
-        const freshTabs: BoardTab[] = data.tabs;
-        updateBoardSize(JSON.stringify(freshTabs).length);
-        if (data.settings && typeof data.settings === 'object') {
-          setBoardSettings(data.settings);
-        }
-        setTabs(freshTabs);
-        setActiveTabId(prev => {
-          if (freshTabs.some(t => t.id === prev)) return prev;
-          return freshTabs[0]?.id || 'default-tab';
-        });
-        return true;
-      } catch (err) {
-        console.error('Failed to refresh board state:', err);
+  const applyFullState = useCallback(async (): Promise<boolean> => {
+    try {
+      // Feature 12 — conditional refetch: the server answers 304 when the
+      // stored revision still matches the one we already applied, skipping
+      // the full payload.
+      const since = appliedRevisionRef.current ?? '';
+      const res = await fetch(`/api/boards/${boardId}/state?since=${encodeURIComponent(since)}`);
+      if (res.status === 401) {
+        handleSessionLost();
         return false;
       }
-    };
-
-    const poll = async () => {
-      if (inFlight || cancelled) return;
-      inFlight = true;
-      try {
-        const res = await fetch(`/api/boards/${boardId}/revision`);
-        if (res.status === 401) {
-          handleSessionLost();
-          return;
-        }
-        if (res.status === 403) {
-          handleMembershipLost();
-          return;
-        }
-        if (res.status === 404) {
-          handleBoardDeleted();
-          return;
-        }
-        if (!res.ok) return;
-        const data = await res.json();
-        const revision = data.updatedAt ?? null;
-        if (revision === null || revision === appliedRevisionRef.current) return;
-        // Never yank state mid-edit; the revision is only marked as applied
-        // once the full state actually landed, so we retry after typing stops.
-        if (isActivelyEditing()) {
-          // Remote changes are queued up — surface it so users know the board
-          // will update (and isn't already reflecting the latest revision).
-          setSaveStatus('syncing');
-          return;
-        }
-        setSaveStatus('syncing');
-        if (await applyFullState()) {
-          appliedRevisionRef.current = revision;
-          setSaveStatus('saved');
-          refreshNotifications();
-        }
-      } catch (err) {
-        console.error('Failed to check board revision:', err);
-      } finally {
-        inFlight = false;
+      if (res.status === 403) {
+        handleMembershipLost();
+        return false;
       }
-    };
+      if (res.status === 404) {
+        handleBoardDeleted();
+        return false;
+      }
+      if (res.status === 304) return true;
+      if (!res.ok) return false;
+      const data = (await res.json()) as { tabs: BoardTab[] | undefined; settings?: BoardSettings };
+      if (!data.tabs || !Array.isArray(data.tabs)) return false;
+      const freshTabs: BoardTab[] = data.tabs;
+      updateBoardSize(JSON.stringify(freshTabs).length);
+      if (data.settings && typeof data.settings === 'object') {
+        setBoardSettings(data.settings);
+      }
+      setTabs(freshTabs);
+      setActiveTabId(prev => {
+        if (freshTabs.some(t => t.id === prev)) return prev;
+        return freshTabs[0]?.id || 'default-tab';
+      });
+      return true;
+    } catch (err) {
+      console.error('Failed to refresh board state:', err);
+      return false;
+    }
+  }, [boardId, updateBoardSize, handleSessionLost, handleMembershipLost, handleBoardDeleted]);
 
-    const intervalId = setInterval(poll, POLL_INTERVAL_MS);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') poll();
-    };
-    window.addEventListener('focus', poll);
-    document.addEventListener('visibilitychange', onVisibilityChange);
+  // Pending-revision machinery: a revision that arrives mid-edit is stashed
+  // and retried after typing stops (mirrors the old poller, which re-checked
+  // every 3 s), and concurrent refetches are serialized via stateInFlightRef.
+  const pendingRevisionRef = useRef<string | null>(null);
+  const stateInFlightRef = useRef(false);
+  const pendingTimerRef = useRef<number | null>(null);
 
+  // Stop pending-revision retries on unmount (redirects after kick/deletion).
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-      window.removeEventListener('focus', poll);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (pendingTimerRef.current !== null) window.clearTimeout(pendingTimerRef.current);
     };
-  }, [boardId, user, refreshNotifications, updateBoardSize]);
+  }, []);
+
+  function requestApplyRevision(revision: string): void {
+    if (stateInFlightRef.current) {
+      pendingRevisionRef.current = revision;
+      return;
+    }
+    if (appliedRevisionRef.current && revision <= appliedRevisionRef.current) return;
+    stateInFlightRef.current = true;
+    setSaveStatus('syncing');
+    applyFullState().then(ok => {
+      stateInFlightRef.current = false;
+      if (!ok) {
+        // Transient failure (network blip): retry shortly, like the old
+        // poller did on its next tick. Auth/404 failures already redirected
+        // inside applyFullState; this retry stops at the next revision event
+        // or unmount.
+        if (appliedRevisionRef.current && revision <= appliedRevisionRef.current) return;
+        pendingRevisionRef.current = revision;
+        if (pendingTimerRef.current === null) {
+          pendingTimerRef.current = window.setTimeout(drainPendingRevision, 1000);
+        }
+        return;
+      }
+      if (appliedRevisionRef.current && revision < appliedRevisionRef.current) {
+        // A local save landed a newer revision while the refetch was in flight.
+        setSaveStatus('saved');
+        drainPendingRevision();
+        return;
+      }
+      appliedRevisionRef.current = revision;
+      setSaveStatus('saved');
+      refreshNotifications();
+      drainPendingRevision();
+    });
+  }
+
+  function drainPendingRevision(): void {
+    pendingTimerRef.current = null;
+    const pending = pendingRevisionRef.current;
+    if (!pending) return;
+    if (appliedRevisionRef.current && pending <= appliedRevisionRef.current) {
+      pendingRevisionRef.current = null;
+      return;
+    }
+    if (isActivelyEditing()) {
+      pendingTimerRef.current = window.setTimeout(drainPendingRevision, 1000);
+      return;
+    }
+    pendingRevisionRef.current = null;
+    requestApplyRevision(pending);
+  }
+
+  function handleBoardRevision(revision: string): void {
+    if (!revision || appliedRevisionRef.current === revision) return;
+    // Never yank state mid-edit; the revision is only marked as applied once
+    // the full state actually landed, so we retry after typing stops.
+    if (isActivelyEditing()) {
+      // Remote changes are queued up — surface it so users know the board
+      // will update (and isn't already reflecting the latest revision).
+      setSaveStatus('syncing');
+      pendingRevisionRef.current = revision;
+      if (pendingTimerRef.current === null) {
+        pendingTimerRef.current = window.setTimeout(drainPendingRevision, 1000);
+      }
+      return;
+    }
+    requestApplyRevision(revision);
+  }
+
+  const fallbackPollRevision = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/boards/${boardId}/revision`);
+      if (res.status === 401) {
+        handleSessionLost();
+        return false;
+      }
+      if (res.status === 403) {
+        handleMembershipLost();
+        return false;
+      }
+      if (res.status === 404) {
+        handleBoardDeleted();
+        return false;
+      }
+      if (!res.ok) return false;
+      const data = await res.json();
+      const revision = data.updatedAt ?? null;
+      if (typeof revision === 'string' && revision) handleBoardRevision(revision);
+      return true;
+    } catch (err) {
+      console.error('Failed to check board revision:', err);
+      return false;
+    }
+  };
+
+  useBoardRealtime({
+    enabled: !!user,
+    url: `/api/boards/${boardId}/events`,
+    handlers: {
+      onRevision: handleBoardRevision,
+      onFallbackPoll: fallbackPollRevision,
+    },
+  });
 
   // All saves are chained onto this promise so requests hit the server strictly
   // in order — otherwise two concurrent saves can resolve out of order and an

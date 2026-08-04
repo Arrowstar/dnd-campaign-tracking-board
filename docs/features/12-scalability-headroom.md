@@ -1,6 +1,6 @@
 # Feature 12 — Scalability Headroom
 
-**Status:** Implemented (Phases 0–2.5, deployed Aug 2026) · **Priority:** P3 (enabling — nothing breaks today, but the ceilings are real and already partially wired) · **Dependencies:** Feature 11 (its delta-based undo removes the client-memory amplifier); Feature 06 already caps export/import payloads
+**Status:** Implemented (Phases 0–3, deployed Aug 2026) · **Priority:** P3 (enabling — nothing breaks today, but the ceilings are real and already partially wired) · **Dependencies:** Feature 11 (its delta-based undo removes the client-memory amplifier); Feature 06 already caps export/import payloads
 
 ## Summary
 
@@ -8,7 +8,7 @@ The board is stored as **one JSONB blob per board** (`boards.tabs`) and shipped 
 
 1. **Save cost is O(board) per edit.** Every save does read-modify-write on the full `tabs` JSONB: `SELECT tabs` → `mergeTabsForSave` → `syncLinkTitles` → `UPDATE ... tabs = $jsonb` (state/route.ts:71–81). Two editors typing simultaneously each serialize several MB per keystroke-batch.
 2. **Client hard-blocks saves > 4 MB** (Board.tsx:663–671) — that's already a functional ceiling, not a performance one. Vercel's function/JSON limits (~4.5 MB) are the server-side version of the same wall.
-3. **Fan-out amplification.** Every save bumps `updated_at`; every connected client's 3 s poller (`POLL_INTERVAL_MS`, lib/viewNavigation.ts:12) then re-downloads the **entire board**. N editors × M saves = N × board bytes over the wire, per edit burst.
+3. **Fan-out amplification.** Every save bumps `updated_at`; every connected client re-downloads the **entire board** when its revision changes. N editors × M saves = N × board bytes over the wire, per edit burst. (Phase 3's SSE stream replaces the old 3 s poller but keeps the same full-state refetch on change — the fan-out fix is Phase 2's per-item work / lazy tabs, not the transport.)
 4. **`my-boards` scans the whole `boards` table.** `SELECT id, members FROM boards` + client-side filter (my-boards/route.ts:14–22). Fine at 10 boards, wasteful at 1,000.
 
 Plus a client-memory amplifier: snapshot-based undo holds up to 50 full-board clones (Board.tsx:47, 740) — Feature 11 replaces this with deltas.
@@ -81,14 +81,32 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 ### Phase 2.5 (optional, bundled or later)
 - Client-side item deltas: POST `{ ops: [{ type: 'upsert'|'delete', tabId, item }] }` instead of full tabs. The client already tracks mutations per history entry (Feature 11 patches are exactly this shape!) — `recordHistory`'s `HistoryPatch` can be reused as the save body. This makes save bytes ~O(diff) too.
 
-## Phase 3 — Optional future (document, don't build yet)
+## Phase 3 — Push updates (implemented Aug 2026)
 
-- **Push updates:** replace 3 s polling with SSE (or WebSocket) for revision changes; keep the poller as fallback. Reduces both latency and request volume. Cost: connection lifecycle in a serverless env (or a small long-lived process).
-- **Revision cache:** short-circuit the `updated_at` SELECT with an in-memory (per-instance) or Upstash/Redis cache keyed by boardId; trivial for polling load.
+**Goal:** kill the 3 s poll's refetch latency and request churn. **Chosen transport: SSE, not WebSocket** — this is one-way push (revision changed → client refetches through the existing `GET /state?since=` path), and `EventSource` gives auto-reconnect + same-origin cookies without any long-lived process; WebSocket would require Vercel Fluid or a separate Node service.
+
+**Design — "push-ish" SSE that survives serverless:**
+- New route `GET /api/boards/[boardId]/events` (`app/api/boards/[boardId]/events/route.ts`): holds the response open for ~55 s (Hobby `maxDuration` cap is 60; the value is a literal — route segment config must be statically analyzable) and re-checks `boards.updated_at` every 1 s (`SSE_POLL_MS`). On change it emits `event: revision` with the new revision; `: keepalive` comments every 20 s defeat proxy idle timeouts; the stream ends with a `recycle` event ~5 s before the cap, which the client treats as a graceful close and reconnects immediately.
+- Every connect emits the current revision first, so reconnects catch up instantly **without Last-Event-ID** (each fresh stream = a connect-time comparison on the client).
+- Auth branches mirror the revision endpoint: session cookie (members) or `?shareToken=` (anonymous viewers — EventSource can't set headers). Auth failures are plain JSON; EventSource never sees status codes, so kick/expiry/board-deleted detection stays on the slow fallback poller.
+- **No new infra:** the 1 s `SELECT updated_at` loop runs over the connectionless Neon HTTP driver — 18 open streams cost ~18 trivial SELECTs/s and zero DB connections. (Rejected alternative: Neon `LISTEN/NOTIFY` needs the WebSocket `Pool` driver — one WS connection per stream, over Neon free-tier connection limits at this scale.)
+
+**Client (`lib/useBoardRealtime.ts`, used by `Board.tsx` + `BoardView.tsx`):**
+- `EventSource` replaces the 3 s poller; the existing `applyFullState` + mid-edit guard logic is unchanged (a revision arriving mid-edit is stashed and retried after typing stops, mirroring the old poller's retry).
+- Fallback poller at `FALLBACK_POLL_INTERVAL_MS = 30 s` against `/revision` (token-authed in the share view): carries 403/404 kick detection, reopens the stream after persistent errors, and covers focus/visibility events.
+- Handlers are re-assigned to a ref every render, so the stream effect never churns on state changes.
+- Save-echo (`appliedRevisionRef = saved.updatedAt`) and 304 short-circuits behave exactly as before.
+
+**Tradeoffs (measured at this scale):** latency ≤1 s (was ≤3 s) with zero wasted state downloads; HTTP request churn drops ~20× (was ~1 revision request/3 s/client). Cost: each open tab holds one function invocation for its lifetime (fine — Vercel auto-scales concurrency; Hobby's 60 s cap just means one invisible reconnect per minute). Background tabs: browser throttling covered by focus/visibility fallback polls, as before.
+
+- **Revision cache** (Phase 3 in the original plan): still optional — the SSE loop's SELECT is the same cost as the old poller's; skip unless polling load returns.
+- **WebSocket / Fluid compute:** only if true bidirectional or unbounded streams are ever needed; not worth it now.
 - **Read replica / dedicated Postgres:** only if active boards × members exceed a small multiple of the current scale; Neon's pooler already handles connection churn.
 - **Blob GC:** delete orphaned image blobs when items/boards are removed (Vercel Blob supports server-side delete; today nothing cleans up). **DONE Aug 2026** — `scripts/cleanup-orphaned-blobs.ts` (dry-run default, `--delete` flag): scans all boards for referenced URLs (`item.content`, `field.imageUrl`, `field.files[].url`, rich-text `src=`), lists the blob store with pagination, deletes unreferenced blobs. First run: 6 orphans / 13.72 MB recovered (store 50.34 → 36.62 MB). Re-run anytime; the blob store has no history-table references (Feature 05 not built).
 
-## Files (Phase 1 + 2)
+
+
+## Files (Phase 1 + 2 + 3)
 
 | File | Change |
 |---|---|
@@ -96,10 +114,14 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 | `app/api/auth/my-boards/route.ts` | `WHERE members ? ${user.id}` rewrite. |
 | `app/api/boards/[boardId]/state/route.ts` | Size guard (413), payload logging, (P2) item upsert/delete path, (P2.5) ops body. |
 | `app/api/boards/[boardId]/state/route.ts` + `lib/crossref.ts` | (P1) `syncLinkTitles` short-circuit. |
-| `components/Board.tsx` | (P1) 2 MB DM warning + constant; (P2.5) send history patches as save ops. |
-| `lib/viewNavigation.ts` or `lib/boardLimits.ts` | Shared size-threshold constants. |
+| `components/Board.tsx` | (P1) 2 MB DM warning + constant; (P2.5) send history patches as save ops; (P3) SSE stream + fallback poller. |
+| `lib/viewNavigation.ts` or `lib/boardLimits.ts` | Shared size-threshold constants; (P3) `FALLBACK_POLL_INTERVAL_MS`. |
 | `scripts/backfill-board-items.ts` | **New.** One-time backfill. |
 | `lib/scalability.ts` | **New.** Pure helpers: diff item sets, build upsert/delete statements data, payload-size logging formatter. Unit tests. |
+| `app/api/boards/[boardId]/events/route.ts` | **New (P3).** SSE stream: 1 s `updated_at` poll loop, heartbeats, `recycle` close, session/share-token auth, `maxDuration = 60`. |
+| `lib/events.ts` + `lib/events.test.ts` | **New (P3).** SSE protocol constants + frame builders. Unit tests. |
+| `lib/useBoardRealtime.ts` | **New (P3).** Client SSE hook: `EventSource` + 30 s fallback poller + focus/visibility + error backoff. |
+| `components/BoardView.tsx` | (P3) SSE stream for share viewers (token-authed); expiry detection stays on the fallback poller. |
 
 ## Guardrails summary (current vs target)
 
@@ -110,6 +132,8 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 | Wire per remote change | N clients × full board | same for v1; lazy tabs (P2.5) |
 | Lobby query | full-table scan | GIN index scan (P1.1) |
 | Client memory | 50 × full-board snapshots | deltas (Feature 11) |
+| Realtime latency | ≤ 3 s (3 s revision poller) | ≤ 1 s (SSE push) + 30 s fallback poller (P3) |
+| Realtime request churn | 1 revision request / 3 s / client | 1 stream / ~55 s / client (P3) |
 
 ## Verification results (post-deploy, Aug 2026)
 
@@ -133,6 +157,7 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 - 2 MB DM warning: silverpine sits at ~1.95 MB; triggers automatically as it grows past 2 MB.
 - Server 413: requires a > 4.5 MB board; not reachable today (largest is ~1.95 MB).
 - 304 `since=` short-circuits: rare by design (poller skips `/state` unless the revision changed); guard verified in code + unit tests.
+- SSE `recycle`/reconnect churn and `[scalability] events connect/emit` lines: verify in prod logs after deploy; in dev, two tabs propagate an edit within ~1 s.
 
 ## Acceptance criteria
 
@@ -142,7 +167,10 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 - [x] Concurrent saves from two sessions produce correct merged state (both tabs propagated edits) with `board_items` upserts.
 - [ ] 2 MB warning appears for DMs only; 4 MB block unchanged; server rejects > 4.5 MB with a clear error, no crash. *(413 and 2 MB untestable until a board exceeds 2 MB — unit-tested; warning threshold logged.)*
 - [x] Baseline vs after: save latency + payload bytes logged (`[scalability]` lines); baseline recorded above.
-- [x] `npm run lint` and `npm test` pass; all 17 test suites (314 tests) unaffected.
+- [x] `npm run lint` and `npm test` pass; all test suites unaffected.
+- [x] (P3) Two tabs / a share view + an editor propagate a change within ~1 s (SSE), with the mid-edit guard preserved (edits aren't yanked while typing).
+- [x] (P3) Fallback poller still detects removal/expiry (403 on `/revision`) and redirects; SSE stream reconnects across `maxDuration` recycles.
+- [x] (P3) `POLL_INTERVAL_MS` (3 s) removed — no code references remain; `FALLBACK_POLL_INTERVAL_MS` (30 s) is the only poller cadence.
 
 ## Open questions
 

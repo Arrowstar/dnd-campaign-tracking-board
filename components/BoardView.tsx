@@ -6,7 +6,8 @@ import { User, BoardTab, BoardViewPayload, Connection, AnnotationFontStyle } fro
 import BoardItem, { ITEM_FIELD_DEFS } from './BoardItem';
 import FocusDrawer from './FocusDrawer';
 import AnnotationCanvas from './AnnotationCanvas';
-import { navigateToItem, flashItemElement, getCanvasViewport, POLL_INTERVAL_MS } from '@/lib/viewNavigation';
+import { navigateToItem, flashItemElement, getCanvasViewport } from '@/lib/viewNavigation';
+import { useBoardRealtime } from '@/lib/useBoardRealtime';
 import { ZoomIn, ZoomOut, Maximize2, LogIn, Loader2, Link2 } from 'lucide-react';
 
 const BOARD_ITEM_LOD_THRESHOLDS = {
@@ -102,7 +103,7 @@ function getConnectionGeometry(conn: Connection, items: { id: string; x: number;
  * Feature 09 — read-only board renderer for anonymous share links.
  * Reuses BoardItem / AnnotationCanvas / FocusDrawer in read-only mode with
  * no-op handlers; fetches the scrubbed payload via the public share API and
- * polls the revision endpoint (token-authed) for live updates.
+ * receives live updates over SSE (token-authed stream, Feature 12 Phase 3).
  */
 export default function BoardView({ boardId, token }: { boardId: string; token: string }) {
   const [payload, setPayload] = useState<BoardViewPayload | null>(null);
@@ -132,6 +133,9 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
       if (!res.ok) return false;
       const data = (await res.json()) as BoardViewPayload;
       setPayload(data);
+      // Track the revision so the SSE stream's connect-time revision event is
+      // a no-op right after a fresh payload load.
+      if (data.updatedAt) appliedRevisionRef.current = data.updatedAt;
       const hashMatch = window.location.hash.match(/^#tab-(.+)$/);
       const fromHash = hashMatch ? hashMatch[1] : null;
       setActiveTabId(prev =>
@@ -258,45 +262,42 @@ export default function BoardView({ boardId, token }: { boardId: string; token: 
     }, 50);
   }, [tabs, activeTabId]);
 
-  // ── Live updates via token-authed revision polling ──
-  useEffect(() => {
-    if (status.kind !== 'loaded') return;
-    let cancelled = false;
-    let inFlight = false;
+  // ── Live updates via SSE push (Feature 12 / Phase 3) ──
+  // The stream pushes the board revision; the full scrubbed payload is only
+  // re-downloaded when it changes. EventSource exposes no HTTP status codes,
+  // so expiry detection stays on the slow fallback poller (token-authed).
+  const handleBoardRevision = (revision: string) => {
+    if (!revision || appliedRevisionRef.current === revision) return;
+    appliedRevisionRef.current = revision;
+    load();
+  };
 
-    const poll = async () => {
-      if (inFlight || cancelled) return;
-      inFlight = true;
-      try {
-        const res = await fetch(`/api/boards/${boardId}/revision?shareToken=${encodeURIComponent(token)}`);
-        if (res.status === 403) {
-          setStatus({ kind: 'expired' });
-          return;
-        }
-        if (!res.ok) return;
-        const data = await res.json();
-        const revision = data.updatedAt ?? null;
-        if (revision === null || revision === appliedRevisionRef.current) return;
-        appliedRevisionRef.current = revision;
-        await load();
-      } catch (err) {
-        console.error('Failed to check share revision:', err);
-      } finally {
-        inFlight = false;
+  const fallbackPollRevision = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/boards/${boardId}/revision?shareToken=${encodeURIComponent(token)}`);
+      if (res.status === 403) {
+        setStatus({ kind: 'expired' });
+        return false;
       }
-    };
+      if (!res.ok) return false;
+      const data = await res.json();
+      const revision = data.updatedAt ?? null;
+      if (typeof revision === 'string' && revision) handleBoardRevision(revision);
+      return true;
+    } catch (err) {
+      console.error('Failed to check share revision:', err);
+      return false;
+    }
+  };
 
-    const intervalId = setInterval(poll, POLL_INTERVAL_MS);
-    const onVisibilityChange = () => { if (document.visibilityState === 'visible') poll(); };
-    window.addEventListener('focus', poll);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-      window.removeEventListener('focus', poll);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, [status.kind, boardId, token, load]);
+  useBoardRealtime({
+    enabled: status.kind === 'loaded',
+    url: `/api/boards/${boardId}/events?shareToken=${encodeURIComponent(token)}`,
+    handlers: {
+      onRevision: handleBoardRevision,
+      onFallbackPoll: fallbackPollRevision,
+    },
+  });
 
   const handleFitView = useCallback(() => {
     if (!activeTab || !setTransformRef.current) return;

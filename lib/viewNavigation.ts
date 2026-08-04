@@ -9,7 +9,13 @@ import { BoardTab } from './types';
  * so it's unit-testable.
  */
 
-export const POLL_INTERVAL_MS = 3000;
+/**
+ * Feature 12 / Phase 3 — cadence of the fallback revision poller that runs
+ * behind the SSE stream (lib/useBoardRealtime.ts). The SSE stream is the fast
+ * path; this slow poller keeps kick/board-deletion detection, which
+ * EventSource cannot surface (it never sees HTTP status codes).
+ */
+export const FALLBACK_POLL_INTERVAL_MS = 30000;
 
 export type NavigationTarget = {
   /** Tab to switch to (null when the item is already on the active tab). */

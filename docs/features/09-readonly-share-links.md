@@ -43,7 +43,7 @@ Joining a board today requires an account (register/login) plus the board id (pl
   - Renders the same `TransformWrapper` canvas (react-zoom-pan-pinch), dotted grid, `BoardItem` at all LOD tiers with **no-op handlers** (no drag/resize/context menu/selection), and `AnnotationCanvas` in view-only mode (no selection, no drawing).
   - Supports `handleScrollToItem` navigation for cross-link chips (tab switch + center + flash) — the logic lives in Board.tsx today; extract the navigation core into `lib/viewNavigation.ts` (or export the callback pattern) so both edit and view modes share it.
   - Read-only FocusDrawer (open by clicking a card): Content tab viewable (rich text display, images with annotations, structured fields), Comments tab read-only, **no Board Card / edit tabs**.
-  - Polls `/revision?shareToken=` every `POLL_INTERVAL_MS` (same constant) for live updates; on 403 → "link expired" state.
+  - Receives live updates over the token-authed SSE stream (`/events?shareToken=`); a slow fallback poller against `/revision?shareToken=` keeps expiry detection (EventSource exposes no status codes); on 403 → "link expired" state.
   - Card font scale from settings applied (rendering consistency).
 - `robots` meta `noindex` on the page (private content by default).
 - Optional deep link: `#tab-<tabId>` hash → initial active tab (cheap, useful for "open this map" sharing).
