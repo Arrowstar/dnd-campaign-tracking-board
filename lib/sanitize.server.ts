@@ -14,7 +14,7 @@ import {
   STYLE_PROP_WHITELIST,
   sanitizeImageUrl,
 } from './sanitize';
-import { BoardItem, BoardTab } from './types';
+import { BoardItem, BoardTab, AttachedFile } from './types';
 
 /** Attributes allowed per tag on the server. `style` passes the shared whitelist. */
 const SERVER_ALLOWED_ATTRS: Record<string, string[]> = {
@@ -42,14 +42,15 @@ export function sanitizeRichTextServer(html: string): string {
     allowedAttributes: SERVER_ALLOWED_ATTRS,
     allowedStyles: { '*': STYLE_PROP_WHITELIST },
     allowedSchemes: ['http', 'https', 'mailto', 'tel'],
-    allowedSchemesByTag: { img: ['http', 'https', 'data', 'blob'] },
+    allowedSchemesByTag: { img: ['http', 'https', 'blob'] },
     allowProtocolRelative: false,
     nestingLimit: 50,
-    // sanitize-html's 'data' scheme allows ANY data: URI — restrict img src
-    // to data:image/* (data:text/html must not survive).
+    // sanitize-html's 'data' scheme allows ANY data: URI — drop every data:
+    // img src so embedded base64 can never be persisted (uploaded images live
+    // in Vercel Blob and come back as blob:/https: URLs).
     transformTags: {
       img: (tagName, attribs) => {
-        if (attribs.src && /^data:/i.test(attribs.src) && !/^data:image\//i.test(attribs.src)) {
+        if (attribs.src && /^data:/i.test(attribs.src)) {
           delete attribs.src;
         }
         return { tagName, attribs };
@@ -88,9 +89,15 @@ export function sanitizeTabsForSave(tabs: BoardTab[]): BoardTab[] {
       const mapped = fields.map((f) => {
         const textValue = typeof f.textValue === 'string' ? sanitizeRichTextServer(f.textValue) : f.textValue;
         const imageUrl = typeof f.imageUrl === 'string' ? sanitizeImageUrl(f.imageUrl) : f.imageUrl;
-        if (textValue === f.textValue && imageUrl === f.imageUrl) return f;
+        const files = f.files && f.files.length > 0
+          ? f.files.map((file: AttachedFile): AttachedFile => {
+              const url = sanitizeImageUrl(file.url || '');
+              return url === file.url ? file : { ...file, url };
+            })
+          : f.files;
+        if (textValue === f.textValue && imageUrl === f.imageUrl && files === f.files) return f;
         changed = true;
-        return { ...f, textValue, imageUrl };
+        return { ...f, textValue, imageUrl, files };
       });
       if (mapped.some((m, i) => m !== fields![i])) fields = mapped;
     }

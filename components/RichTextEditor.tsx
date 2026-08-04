@@ -200,6 +200,11 @@ export function RichTextEditor({
   cardsRef.current = cards || [];
   const cardLinkSuggestionExtension = createCardLinkSuggestion(() => cardsRef.current);
 
+  // editorProps closures capture the first-render scope — track mutable
+  // values in refs so paste/drop handlers never act on stale state.
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
@@ -224,6 +229,30 @@ export function RichTextEditor({
     ],
     editorProps: {
       attributes: getEditorAttributes(isLight, compact),
+      handlePaste: (_view, event) => {
+        if (disabledRef.current) return false;
+        const file = event.clipboardData?.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+          uploadPastedImageFile(file);
+          return true;
+        }
+        const html = event.clipboardData?.getData('text/html');
+        if (html && /data:image\//i.test(html)) {
+          void uploadPastedHtml(html);
+          return true;
+        }
+        return false;
+      },
+      handleDrop: (view, event) => {
+        if (disabledRef.current) return false;
+        const file = event.dataTransfer?.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+          const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          uploadPastedImageFile(file, coords?.pos);
+          return true;
+        }
+        return false;
+      },
     },
     onUpdate: ({ editor }) => {
       if (skipNextUpdate.current) {
@@ -238,6 +267,64 @@ export function RichTextEditor({
     },
     onTransaction: () => setTick(t => t + 1),
   });
+
+  // Pasted/dropped images are uploaded to Vercel Blob and inserted as blob
+  // URLs — data: URIs are never inserted (they bloat the board JSONB and the
+  // server strips them anyway). Defined after useEditor so `editor` is bound;
+  // the editorProps handlers above call these only at paste/drop time.
+  const uploadPastedImageFile = useCallback(
+    (file: File, pos?: number) => {
+      if (!editor || disabledRef.current) return;
+      setImageUpload({ percent: 0, error: null });
+      uploadFileToBlob(file, {
+        boardId,
+        onProgress: (percent) => setImageUpload((prev) => (prev ? { ...prev, percent } : prev)),
+      })
+        .then((url) => {
+          if (pos != null) {
+            editor.chain().focus().insertContentAt(pos, { type: 'image', attrs: { src: url } }).run();
+          } else {
+            editor.chain().focus().setImage({ src: url }).run();
+          }
+          setImageUpload(null);
+        })
+        .catch((err) => {
+          console.error('Pasted/dropped image upload failed:', err);
+          setImageUpload((prev) => (prev ? { ...prev, percent: 0, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+          setTimeout(() => setImageUpload(null), 6000);
+        });
+    },
+    [editor, boardId]
+  );
+
+  const uploadPastedHtml = useCallback(
+    async (html: string) => {
+      if (!editor || disabledRef.current) return;
+      const matches = Array.from(html.matchAll(/src="(data:image\/[^"]+)"/gi)).map((m) => m[1]);
+      const unique = Array.from(new Set(matches));
+      if (unique.length === 0) return;
+      setImageUpload({ percent: 0, error: null });
+      try {
+        let out = html;
+        let done = 0;
+        for (const dataUrl of unique) {
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          const url = await uploadFileToBlob(new File([blob], 'pasted-image', { type: blob.type }), { boardId });
+          out = out.split(dataUrl).join(url);
+          done++;
+          setImageUpload((prev) => (prev ? { ...prev, percent: Math.round((done / unique.length) * 100) } : prev));
+        }
+        editor.chain().focus().insertContent(out).run();
+        setImageUpload(null);
+      } catch (err) {
+        console.error('Pasted HTML image upload failed:', err);
+        setImageUpload((prev) => (prev ? { ...prev, percent: 0, error: err instanceof Error ? err.message : 'Upload failed' } : prev));
+        setTimeout(() => setImageUpload(null), 6000);
+      }
+    },
+    [editor, boardId]
+  );
 
   // Keep editor in sync with external value changes (undo in drawer, etc.)
   useEffect(() => {

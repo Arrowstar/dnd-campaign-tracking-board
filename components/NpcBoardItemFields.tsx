@@ -25,6 +25,7 @@ import {
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { uploadFileToBlob, CropRect } from '@/lib/utils';
+import { sanitizeImageUrl } from '@/lib/sanitize';
 import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
 import { FieldVisibilityToggle } from './StructuredBoardItemFields';
 import UploadProgress from './UploadProgress';
@@ -252,6 +253,7 @@ export default function NpcBoardItemFields({
 
   // Input state for image/file links
   const [activeUrlInput, setActiveUrlInput] = useState<{ fieldId: string; type: 'image' | 'file'; text: string; fileName?: string } | null>(null);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
 
   // Per-field in-flight upload progress.
@@ -414,6 +416,13 @@ export default function NpcBoardItemFields({
 
   const handleAddFileUrl = (fieldId: string, url: string, customName?: string) => {
     if (!url.trim()) return;
+    // data: URIs and other non-http(s)/blob schemes are rejected — embedded
+    // base64 bloat the board JSONB and the server strips them anyway.
+    if (!sanitizeImageUrl(url.trim())) {
+      setUrlError('Only http(s) or blob: URLs are supported — upload files instead of embedding them.');
+      return;
+    }
+    setUrlError(null);
     const currentField = fields.find(f => f.id === fieldId);
     const existingAttached = currentField?.files || [];
     
@@ -1251,11 +1260,14 @@ export default function NpcBoardItemFields({
                         <input
                           type="url"
                           value={activeUrlInput.text}
-                          onChange={(e) => setActiveUrlInput({ ...activeUrlInput, text: e.target.value })}
+                          onChange={(e) => { setActiveUrlInput({ ...activeUrlInput, text: e.target.value }); setUrlError(null); }}
                           placeholder="URL (e.g., https://example.com/sheet.pdf)"
                           className="px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none"
                           onPointerDown={(e) => e.stopPropagation()}
                         />
+                        {urlError && (
+                          <p className="text-[11px] text-red-600 font-semibold">{urlError}</p>
+                        )}
                         <div className="flex justify-end gap-1.5 pt-1">
                           <button
                             type="button"

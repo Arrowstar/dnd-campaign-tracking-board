@@ -29,6 +29,7 @@ import {
 import ImageDrawer from './ImageDrawer';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { uploadFileToBlob, CropRect } from '@/lib/utils';
+import { sanitizeImageUrl } from '@/lib/sanitize';
 import { canViewField, inferFieldVisibility } from '@/lib/fieldVisibility';
 import UploadProgress from './UploadProgress';
 import ImageCropModal from './ImageCropModal';
@@ -261,6 +262,7 @@ export default function StructuredBoardItemFields({
     text: string;
     fileName?: string;
   } | null>(null);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   // Per-field in-flight upload progress.
   const [uploadState, setUploadState] = useState<Record<string, { label: string; percent: number; error: string | null }>>({});
@@ -443,6 +445,13 @@ export default function StructuredBoardItemFields({
 
   const handleAddFileUrl = (fieldId: string, url: string, customName?: string) => {
     if (!url.trim()) return;
+    // data: URIs and other non-http(s)/blob schemes are rejected — embedded
+    // base64 bloat the board JSONB and the server strips them anyway.
+    if (!sanitizeImageUrl(url.trim())) {
+      setUrlError('Only http(s) or blob: URLs are supported — upload files instead of embedding them.');
+      return;
+    }
+    setUrlError(null);
     const currentField = fields.find((f) => f.id === fieldId);
     const existing = currentField?.files || [];
     let derivedName = customName?.trim() || '';
@@ -1144,21 +1153,30 @@ export default function StructuredBoardItemFields({
                 <input
                   type="url"
                   value={activeUrlInput.text}
-                  onChange={(e) => setActiveUrlInput({ ...activeUrlInput, text: e.target.value })}
+                  onChange={(e) => { setActiveUrlInput({ ...activeUrlInput, text: e.target.value }); setUrlError(null); }}
                   placeholder="https://example.com/image.jpg"
                   className="px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none"
                   autoFocus
                   onPointerDown={(e) => e.stopPropagation()}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      if (activeUrlInput.text.trim()) handleUpdateField(field.id, { imageUrl: activeUrlInput.text.trim() });
+                      const clean = sanitizeImageUrl(activeUrlInput.text.trim());
+                      if (!clean) {
+                        setUrlError('Only http(s) or blob: image URLs are supported — embedded images must be uploaded.');
+                        return;
+                      }
+                      setUrlError(null);
+                      handleUpdateField(activeUrlInput.fieldId, { imageUrl: clean });
                       setActiveUrlInput(null);
                     }
                   }}
                 />
+                {urlError && (
+                  <p className="text-[11px] text-red-600 font-semibold">{urlError}</p>
+                )}
                 <div className="flex justify-end gap-1.5">
-                  <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setActiveUrlInput(null); }} className="px-2 py-0.5 text-xs text-[#8C7B6E] hover:text-[#2C2824]">Cancel</button>
-                  <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (activeUrlInput.text.trim()) handleUpdateField(field.id, { imageUrl: activeUrlInput.text.trim() }); setActiveUrlInput(null); }} className="px-2.5 py-1 bg-[#2C2824] text-white text-xs font-bold rounded cursor-pointer">Apply Image</button>
+                  <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setActiveUrlInput(null); setUrlError(null); }} className="px-2 py-0.5 text-xs text-[#8C7B6E] hover:text-[#2C2824]">Cancel</button>
+                  <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); const clean = sanitizeImageUrl(activeUrlInput.text.trim()); if (!clean) { setUrlError('Only http(s) or blob: image URLs are supported — embedded images must be uploaded.'); return; } setUrlError(null); handleUpdateField(activeUrlInput.fieldId, { imageUrl: clean }); setActiveUrlInput(null); }} className="px-2.5 py-1 bg-[#2C2824] text-white text-xs font-bold rounded cursor-pointer">Apply Image</button>
                 </div>
               </div>
             )}
@@ -1280,7 +1298,10 @@ export default function StructuredBoardItemFields({
         <div className="p-2.5 bg-[#F5F2ED] border border-[#D9D0C1] rounded flex flex-col gap-2 mt-1" data-interactive="true">
           <span className="text-[10px] font-bold uppercase text-[#8C7B6E]">Link External Document or Web Resource</span>
           <input type="text" value={activeUrlInput.fileName || ''} onChange={(e) => setActiveUrlInput({ ...activeUrlInput, fileName: e.target.value })} placeholder="Display Name (e.g., Character Sheet PDF)" className="px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none" onPointerDown={(e) => e.stopPropagation()} />
-          <input type="url" value={activeUrlInput.text} onChange={(e) => setActiveUrlInput({ ...activeUrlInput, text: e.target.value })} placeholder="URL (e.g., https://example.com/sheet.pdf)" className="px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none" onPointerDown={(e) => e.stopPropagation()} />
+          <input type="url" value={activeUrlInput.text} onChange={(e) => { setActiveUrlInput({ ...activeUrlInput, text: e.target.value }); setUrlError(null); }} placeholder="URL (e.g., https://example.com/sheet.pdf)" className="px-2 py-1 text-xs bg-white border border-[#D9D0C1] rounded outline-none" onPointerDown={(e) => e.stopPropagation()} />
+          {urlError && (
+            <p className="text-[11px] text-red-600 font-semibold">{urlError}</p>
+          )}
           <div className="flex justify-end gap-1.5 pt-1">
             <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setActiveUrlInput(null); }} className="px-2 py-0.5 text-xs text-[#8C7B6E] hover:text-[#2C2824]">Cancel</button>
             <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); handleAddFileUrl(field.id, activeUrlInput.text, activeUrlInput.fileName); }} className="px-2.5 py-1 bg-[#2C2824] text-white text-xs font-bold rounded cursor-pointer">Add Link</button>

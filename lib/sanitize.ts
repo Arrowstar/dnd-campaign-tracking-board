@@ -47,12 +47,12 @@ export const RICH_TEXT_ALLOWED_ATTRS = [
 ];
 
 /**
- * URI schemes allowed in href/src. `data:image/` is kept for legacy pasted
- * images; `blob:` for Vercel Blob uploads. Everything else (javascript:,
- * data:text/html, vbscript: …) is rejected by this regex.
+ * URI schemes allowed in href/src. `blob:` for Vercel Blob uploads. Everything
+ * else — including ALL `data:` URIs (even data:image/*, which used to bloat
+ * boards with embedded base64) — is rejected by this regex.
  */
 export const RICH_TEXT_ALLOWED_URI_REGEXP =
-  /^(?:(?:https?|mailto|tel|blob):|data:image\/|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  /^(?:(?:https?|mailto|tel|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 /** CSS properties rich text may carry, with the values each accepts. */
 export const STYLE_PROP_WHITELIST: Record<string, RegExp[]> = {
@@ -103,9 +103,9 @@ export function applyAttributeWhitelist(node: Element): void {
     else node.removeAttribute('style');
   }
   // DOMPurify's DATA_URI_TAGS bypass lets ANY data: URI through on img/audio/
-  // video src — restrict it to data:image/* (data:text/html must not survive).
+  // video src — strip them all; images must come from http(s)/blob URLs.
   const src = node.getAttribute('src');
-  if (src != null && /^data:/i.test(src) && !/^data:image\//i.test(src)) {
+  if (src != null && /^data:/i.test(src)) {
     node.removeAttribute('src');
   }
 }
@@ -131,8 +131,9 @@ export function sanitizeRichText(html: string): string {
 
 /**
  * Validates a user-supplied image/attachment URL. Anything that is not
- * http(s)/blob (Vercel Blob) or a data:image URI is rejected.
+ * http(s)/blob (Vercel Blob) is rejected — `data:` URIs are never accepted,
+ * so embedded base64 can't be persisted into a board.
  */
 export function sanitizeImageUrl(url: string): string {
-  return /^(?:https?:|blob:|data:image\/)/i.test(url) ? url : '';
+  return /^(?:https?:|blob:)/i.test(url) ? url : '';
 }

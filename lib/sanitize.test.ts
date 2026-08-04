@@ -149,10 +149,11 @@ describe('client DOMPurify sanitization', () => {
     expect(out).not.toContain('position');
   });
 
-  it('keeps blob and data:image img sources', () => {
+  it('keeps blob img sources but strips data:image (embedded base64)', () => {
     const out = sanitize('<img src="blob:https://app.example/uuid" alt="a"><img src="data:image/png;base64,AAAA" alt="b">');
     expect(out).toContain('blob:https://app.example/uuid');
-    expect(out).toContain('data:image/png;base64,AAAA');
+    expect(out).not.toContain('data:image');
+    expect(out).not.toContain('base64');
   });
 });
 
@@ -179,13 +180,13 @@ describe('filterStyleAttr', () => {
 // ─── sanitizeImageUrl ────────────────────────────────────────────────────────
 
 describe('sanitizeImageUrl', () => {
-  it('accepts http(s), blob, and data:image URLs', () => {
+  it('accepts http(s) and blob URLs', () => {
     expect(sanitizeImageUrl('https://blob.vercel-storage.com/a.png')).toBe('https://blob.vercel-storage.com/a.png');
     expect(sanitizeImageUrl('blob:https://app.example/123')).toBe('blob:https://app.example/123');
-    expect(sanitizeImageUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
   });
 
-  it('rejects javascript:, data:text/html, and garbage', () => {
+  it('rejects data:image, javascript:, data:text/html, and garbage', () => {
+    expect(sanitizeImageUrl('data:image/png;base64,AAAA')).toBe('');
     expect(sanitizeImageUrl('javascript:alert(1)')).toBe('');
     expect(sanitizeImageUrl('data:text/html;base64,PHNjcmlwdD4=')).toBe('');
     expect(sanitizeImageUrl('not a url')).toBe('');

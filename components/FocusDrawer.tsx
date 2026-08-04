@@ -32,6 +32,7 @@ import ImageDrawer from './ImageDrawer';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { uploadFileToBlob, CropRect } from '@/lib/utils';
+import { sanitizeImageUrl } from '@/lib/sanitize';
 import UploadProgress from './UploadProgress';
 import ImageCropModal from './ImageCropModal';
 
@@ -1270,6 +1271,7 @@ function ImageBoardItemContent({
 }) {
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlInputText, setUrlInputText] = useState(item.content?.startsWith('data:') ? '' : item.content || '');
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   // In-flight blob upload progress, shown over the image zone.
   const [upload, setUpload] = useState<{ label: string; percent: number; error: string | null } | null>(null);
@@ -1284,6 +1286,24 @@ function ImageBoardItemContent({
       crop: cropRect,
     });
     setCropOpen(false);
+  };
+
+  const applyUrlInput = () => {
+    const value = urlInputText.trim();
+    if (!value) {
+      setUrlError('Enter an image URL.');
+      return;
+    }
+    const clean = sanitizeImageUrl(value);
+    if (!clean) {
+      // data: URIs (embedded base64) are never allowed — they bloat the board
+      // and the server strips them anyway.
+      setUrlError('Only http(s) or blob: image URLs are supported — embedded images must be uploaded.');
+      return;
+    }
+    setUrlError(null);
+    onUpdate({ ...item, content: clean });
+    setShowUrlInput(false);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1418,29 +1438,26 @@ function ImageBoardItemContent({
                   <input
                     type="url"
                     value={urlInputText}
-                    onChange={e => setUrlInputText(e.target.value)}
+                    onChange={e => { setUrlInputText(e.target.value); setUrlError(null); }}
                     placeholder="https://example.com/image.jpg"
                     className="flex-1 px-3 py-1.5 text-xs bg-white border border-[#D9D0C1] rounded outline-none text-[#2C2824] focus:border-[#B58D3D]"
                     onKeyDown={e => {
-                      if (e.key === 'Enter' && urlInputText.trim()) {
-                        onUpdate({ ...item, content: urlInputText.trim() });
-                        setShowUrlInput(false);
+                      if (e.key === 'Enter') {
+                        applyUrlInput();
                       }
                     }}
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      if (urlInputText.trim()) {
-                        onUpdate({ ...item, content: urlInputText.trim() });
-                        setShowUrlInput(false);
-                      }
-                    }}
+                    onClick={applyUrlInput}
                     className="px-3 py-1.5 bg-[#2C2824] hover:bg-[#423D38] text-white text-xs font-bold rounded cursor-pointer transition-colors"
                   >
                     Apply
                   </button>
                 </div>
+              )}
+              {urlError && (
+                <p className="text-[11px] text-red-600 font-semibold pt-0.5">{urlError}</p>
               )}
             </div>
           )}
@@ -1487,30 +1504,27 @@ function ImageBoardItemContent({
                     <input
                       type="url"
                       value={urlInputText}
-                      onChange={e => setUrlInputText(e.target.value)}
+                      onChange={e => { setUrlInputText(e.target.value); setUrlError(null); }}
                       placeholder="https://example.com/map.jpg"
                       className="flex-1 px-3 py-1.5 text-xs bg-white border border-[#D9D0C1] rounded outline-none text-[#2C2824] focus:border-[#B58D3D]"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Enter' && urlInputText.trim()) {
-                          onUpdate({ ...item, content: urlInputText.trim() });
-                          setShowUrlInput(false);
+                        if (e.key === 'Enter') {
+                          applyUrlInput();
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        if (urlInputText.trim()) {
-                          onUpdate({ ...item, content: urlInputText.trim() });
-                          setShowUrlInput(false);
-                        }
-                      }}
+                      onClick={applyUrlInput}
                       className="px-3.5 py-1.5 bg-[#2C2824] hover:bg-[#423D38] text-white text-xs font-bold rounded cursor-pointer transition-colors"
                     >
                       Apply
                     </button>
                   </div>
+                  {urlError && (
+                    <p className="text-[11px] text-red-600 font-semibold">{urlError}</p>
+                  )}
                 </div>
               )}
             </div>
