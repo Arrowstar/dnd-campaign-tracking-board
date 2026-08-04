@@ -58,13 +58,16 @@ const BOARD_ITEM_LOD_THRESHOLDS = {
 // Bulk-bar alignment actions: icons + labels for the Align… popover. The three
 // "vertical" variants align along the horizontal axis (left/center/right) and
 // the three "horizontal" variants along the vertical axis (top/middle/bottom).
+// Lucide names these icons by the ORIENTATION OF THE REFERENCE LINE: the
+// *-horizontal icons draw a horizontal reference line (→ top/middle/bottom)
+// and the *-vertical icons a vertical one (→ left/center/right).
 const ALIGN_ACTIONS: { mode: AlignMode; label: string; title: string; icon: ReactNode }[] = [
-  { mode: 'left', label: 'Left', title: 'Align left edges', icon: <AlignStartHorizontal size={16} /> },
-  { mode: 'center-x', label: 'Center', title: 'Align vertical midlines', icon: <AlignCenterHorizontal size={16} /> },
-  { mode: 'right', label: 'Right', title: 'Align right edges', icon: <AlignEndHorizontal size={16} /> },
-  { mode: 'top', label: 'Top', title: 'Align top edges', icon: <AlignStartVertical size={16} /> },
-  { mode: 'middle-y', label: 'Middle', title: 'Align horizontal midlines', icon: <AlignCenterVertical size={16} /> },
-  { mode: 'bottom', label: 'Bottom', title: 'Align bottom edges', icon: <AlignEndVertical size={16} /> },
+  { mode: 'left', label: 'Left', title: 'Align left edges', icon: <AlignStartVertical size={16} /> },
+  { mode: 'center-x', label: 'Center', title: 'Align vertical midlines', icon: <AlignCenterVertical size={16} /> },
+  { mode: 'right', label: 'Right', title: 'Align right edges', icon: <AlignEndVertical size={16} /> },
+  { mode: 'top', label: 'Top', title: 'Align top edges', icon: <AlignStartHorizontal size={16} /> },
+  { mode: 'middle-y', label: 'Middle', title: 'Align horizontal midlines', icon: <AlignCenterHorizontal size={16} /> },
+  { mode: 'bottom', label: 'Bottom', title: 'Align bottom edges', icon: <AlignEndHorizontal size={16} /> },
 ];
 
 // Undo/redo history (Feature 11): maximum retained steps, the time window in
