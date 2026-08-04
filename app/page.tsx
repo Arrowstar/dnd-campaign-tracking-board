@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import UserSettingsModal from '@/components/UserSettingsModal';
 import TransferDmModal from '@/components/TransferDmModal';
+import { clearHistoryForUser } from '@/lib/undoHistory';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -245,6 +246,9 @@ export default function Home() {
   // ── Logout ─────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     if (session) {
+      // Feature 11 — undo/redo history is user-scoped; wipe it on logout so a
+      // different account on the same machine never sees this user's steps.
+      clearHistoryForUser(session.userId);
       // Server deletes the session row and clears the HttpOnly cookie.
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }

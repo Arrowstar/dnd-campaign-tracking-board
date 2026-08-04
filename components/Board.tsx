@@ -27,6 +27,16 @@ import BoardSettingsModal from './BoardSettingsModal';
 import GlobalSearchModal from './GlobalSearchModal';
 import { recordRecentItem } from '@/lib/search';
 import { navigateToItem, flashItemElement, getCanvasViewport, POLL_INTERVAL_MS } from '@/lib/viewNavigation';
+import {
+  applyPatch,
+  computeDiff,
+  historyKeyFor,
+  loadHistory,
+  saveHistory,
+  clearHistoryForBoard,
+  HISTORY_LIMIT,
+  UndoEntry,
+} from '@/lib/undoHistory';
 import NotificationBell from './NotificationBell';
 import type { NotificationRow } from '@/app/api/boards/[boardId]/notifications/route';
 
@@ -40,12 +50,14 @@ const BOARD_ITEM_LOD_THRESHOLDS = {
   pinScreenSize: 36,
 };
 
-// Undo/redo history: maximum retained steps, and the time window in which
-// consecutive mutations to the same target (item/connection/annotation/tab)
-// are merged into a single undo step (e.g. per-keystroke typing, annotation
-// drags, connection label editing).
-const HISTORY_LIMIT = 50;
+// Undo/redo history (Feature 11): maximum retained steps, the time window in
+// which consecutive mutations to the same target (item/connection/annotation/
+// tab) are merged into a single undo step (e.g. per-keystroke typing, annotation
+// drags, connection label editing), and the debounce for persisting the stacks
+// to user-scoped localStorage keys. HISTORY_LIMIT lives in lib/undoHistory.ts
+// (single source, shared with the serialized payload).
 const COALESCE_MS = 1000;
+const HISTORY_PERSIST_DEBOUNCE_MS = 500;
 
 function getBoxIntersection(cx: number, cy: number, hw: number, hh: number, targetCx: number, targetCy: number) {
   const dx = targetCx - cx;
@@ -359,22 +371,30 @@ export default function Board({ boardId }: { boardId: string }) {
   const appliedRevisionRef = useRef<string | null>(null);
 
   // ── Undo / Redo history ─────────────────────────────────────────────────────
-  // Snapshot-based: every local mutation funnels through saveState /
-  // saveFullTabsState, which record { before, after } snapshots of the full
-  // tabs array + active tab id. Remote realtime applies call setTabs directly
-  // and never enter the history, so undo only ever reverts local actions.
-  type HistorySnapshot = { tabs: BoardTab[]; activeTabId: string };
-  type HistoryEntry = {
-    key: string;
-    time: number;
-    before: HistorySnapshot;
-    after: HistorySnapshot;
+  // Feature 11: id-keyed delta patches (lib/undoHistory.ts) replace full-board
+  // snapshots. Every local mutation funnels through saveState /
+  // saveFullTabsState, which record the diff; remote realtime applies call
+  // setTabs directly and never enter the history, so undo only ever reverts
+  // local actions — and applyPatch reconciles those actions against the
+  // CURRENT state, so remote work is skipped rather than clobbered. Stacks are
+  // persisted (debounced) to user-scoped localStorage and hydrated on mount.
+  type HistoryStackEntry = {
+    entry: UndoEntry;
+    // Reference to the tabs state before/after this step — used ONLY by the
+    // coalescing reference-equality guard (never serialized; hydrated entries
+    // carry null refs and therefore never coalesce across sessions).
+    beforeTabsRef: BoardTab[] | null;
+    afterTabsRef: BoardTab[] | null;
   };
-  const undoStackRef = useRef<HistoryEntry[]>([]);
-  const redoStackRef = useRef<HistoryEntry[]>([]);
+  const undoStackRef = useRef<HistoryStackEntry[]>([]);
+  const redoStackRef = useRef<HistoryStackEntry[]>([]);
   const uniqueMutationRef = useRef(0);
   const [undoCount, setUndoCount] = useState(0);
   const [redoCount, setRedoCount] = useState(0);
+
+  // Feature 11 — transient "undo/redo skipped" notice (passive pill, auto-dismiss).
+  const [skipNotice, setSkipNotice] = useState<string | null>(null);
+  const skipNoticeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setUndoCount(undoStackRef.current.length);
@@ -464,6 +484,8 @@ export default function Board({ boardId }: { boardId: string }) {
           return null;
         }
         if (res.status === 404) {
+          // Board gone — its per-user history keys are dead weight; drop them.
+          clearHistoryForBoard(boardId);
           alert('This board was deleted by its DM.');
           window.location.href = '/';
           return null;
@@ -499,6 +521,16 @@ export default function Board({ boardId }: { boardId: string }) {
           if (parsedTabs.some(t => t.id === prev)) return prev;
           return parsedTabs[0]?.id || 'default-tab';
         });
+        // Feature 11 — hydrate the persisted undo/redo stacks (user-scoped
+        // keys; hydrated entries never coalesce because their refs are null).
+        // Runs after setUser/setTabs so the toolbar buttons light up with the
+        // restored counts immediately.
+        undoStackRef.current = loadHistory(historyKeyFor(data.userId, boardId, 'undo'))
+          .map(entry => ({ entry, beforeTabsRef: null, afterTabsRef: null }));
+        redoStackRef.current = loadHistory(historyKeyFor(data.userId, boardId, 'redo'))
+          .map(entry => ({ entry, beforeTabsRef: null, afterTabsRef: null }));
+        setUndoCount(undoStackRef.current.length);
+        setRedoCount(redoStackRef.current.length);
       })
       .catch(err => console.error('Failed to load board:', err));
   }, [boardId]);
@@ -550,6 +582,8 @@ export default function Board({ boardId }: { boardId: string }) {
     };
 
     const handleBoardDeleted = () => {
+      // Board gone — drop the per-user history keys for it.
+      clearHistoryForBoard(boardId);
       alert('This board was deleted by its DM.');
       window.location.href = '/';
     };
@@ -678,7 +712,9 @@ export default function Board({ boardId }: { boardId: string }) {
           if (!res.ok) {
             if (res.status === 404) {
               // Board deleted by its DM while this user had unsaved edits —
-              // surface it and leave; there is nothing left to save to.
+              // surface it and leave; there is nothing left to save to. Drop
+              // the per-user history keys for the gone board.
+              clearHistoryForBoard(boardId);
               alert('This board was deleted by its DM.');
               window.location.href = '/';
               return;
@@ -714,6 +750,50 @@ export default function Board({ boardId }: { boardId: string }) {
     [boardId, user, refreshNotifications]
   );
 
+  // ── Feature 11 — history persistence (debounced localStorage writes) ────────
+  const historyPersistTimerRef = useRef<number | null>(null);
+
+  const flushHistoryPersist = useCallback(() => {
+    if (!user) return;
+    saveHistory(
+      historyKeyFor(user.id, boardId, 'undo'),
+      undoStackRef.current.map((s) => s.entry)
+    );
+    saveHistory(
+      historyKeyFor(user.id, boardId, 'redo'),
+      redoStackRef.current.map((s) => s.entry)
+    );
+  }, [user, boardId]);
+
+  const scheduleHistoryPersist = useCallback(() => {
+    if (!user) return;
+    if (historyPersistTimerRef.current !== null) window.clearTimeout(historyPersistTimerRef.current);
+    historyPersistTimerRef.current = window.setTimeout(() => {
+      historyPersistTimerRef.current = null;
+      flushHistoryPersist();
+    }, HISTORY_PERSIST_DEBOUNCE_MS);
+  }, [user, flushHistoryPersist]);
+
+  // Flush any pending write when the tab is about to unload so the last step
+  // survives a reload/navigation instead of being lost to the debounce.
+  useEffect(() => {
+    const flush = () => {
+      if (historyPersistTimerRef.current !== null) {
+        window.clearTimeout(historyPersistTimerRef.current);
+        historyPersistTimerRef.current = null;
+      }
+      flushHistoryPersist();
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [flushHistoryPersist]);
+
+  const showSkipNotice = useCallback((message: string) => {
+    setSkipNotice(message);
+    if (skipNoticeTimerRef.current !== null) window.clearTimeout(skipNoticeTimerRef.current);
+    skipNoticeTimerRef.current = window.setTimeout(() => setSkipNotice(null), 3000);
+  }, []);
+
   const recordHistory = useCallback((prevTabs: BoardTab[], nextTabs: BoardTab[], key: string, nextActiveTabId?: string) => {
     const stack = undoStackRef.current;
     const last = stack[stack.length - 1];
@@ -721,53 +801,87 @@ export default function Board({ boardId }: { boardId: string }) {
     const afterActiveTabId = nextActiveTabId ?? activeTabId;
     // Coalesce: keep extending the most recent entry while the same target is
     // being edited within the window. Reference equality on the "after" state
-    // guarantees we never merge across a remote realtime apply.
+    // guarantees we never merge across a remote realtime apply. The merged
+    // entry is the diff from the FIRST "before" to the LATEST "after" —
+    // recomputed each keystroke, so the stored patch always covers the whole
+    // coalesced step.
     if (
       last &&
-      last.key === key &&
-      now - last.time < COALESCE_MS &&
-      last.after.tabs === prevTabs
+      last.beforeTabsRef !== null &&
+      last.afterTabsRef !== null &&
+      last.entry.key === key &&
+      now - last.entry.time < COALESCE_MS &&
+      last.afterTabsRef === prevTabs
     ) {
-      last.after = { tabs: nextTabs, activeTabId: afterActiveTabId };
-      last.time = now;
+      last.entry.patch = computeDiff(last.beforeTabsRef, nextTabs);
+      last.entry.time = now;
+      last.entry.activeTabIdAfter = afterActiveTabId;
+      last.afterTabsRef = nextTabs;
+      scheduleHistoryPersist();
       return;
     }
     // New history branch — anything redoable is discarded.
     redoStackRef.current = [];
     stack.push({
-      key,
-      time: now,
-      before: { tabs: structuredClone(prevTabs), activeTabId },
-      after: { tabs: nextTabs, activeTabId: afterActiveTabId },
+      entry: {
+        key,
+        time: now,
+        patch: computeDiff(prevTabs, nextTabs),
+        activeTabIdBefore: activeTabId,
+        activeTabIdAfter: afterActiveTabId,
+      },
+      beforeTabsRef: prevTabs,
+      afterTabsRef: nextTabs,
     });
     if (stack.length > HISTORY_LIMIT) stack.shift();
-  }, [activeTabId]);
+    scheduleHistoryPersist();
+  }, [activeTabId, scheduleHistoryPersist]);
 
   const handleUndo = useCallback(() => {
-    const entry = undoStackRef.current.pop();
-    if (!entry) return;
-    redoStackRef.current.push(entry);
-    setTabs(entry.before.tabs);
-    setActiveTabId(entry.before.activeTabId);
-    persistBoardState(entry.before.tabs);
+    const item = undoStackRef.current.pop();
+    if (!item) return;
+    redoStackRef.current.push(item);
+    const { entry } = item;
+    // Reconcile the patch against the CURRENT state — never restore a stale
+    // whole-board snapshot. Ids the user didn't mutate stay; ids changed
+    // remotely since are skipped (with a notice), never clobbered.
+    const reconciled = applyPatch(tabs, entry.patch, 'undo');
+    setTabs(reconciled.tabs);
+    setActiveTabId(entry.activeTabIdBefore);
+    if (reconciled.tabs !== tabs) persistBoardState(reconciled.tabs);
     clearItemSelection();
+    // Prune the focused item if the reconciled state no longer contains it.
     setFocusedItemId(prev =>
-      prev && entry.before.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
+      prev && reconciled.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
     );
-  }, [persistBoardState, clearItemSelection]);
+    if (reconciled.skipped.length > 0) {
+      showSkipNotice('1 undo step skipped — the board changed');
+    }
+    setUndoCount(undoStackRef.current.length);
+    setRedoCount(redoStackRef.current.length);
+    scheduleHistoryPersist();
+  }, [tabs, persistBoardState, clearItemSelection, showSkipNotice, scheduleHistoryPersist]);
 
   const handleRedo = useCallback(() => {
-    const entry = redoStackRef.current.pop();
-    if (!entry) return;
-    undoStackRef.current.push(entry);
-    setTabs(entry.after.tabs);
-    setActiveTabId(entry.after.activeTabId);
-    persistBoardState(entry.after.tabs);
+    const item = redoStackRef.current.pop();
+    if (!item) return;
+    undoStackRef.current.push(item);
+    const { entry } = item;
+    const reconciled = applyPatch(tabs, entry.patch, 'redo');
+    setTabs(reconciled.tabs);
+    setActiveTabId(entry.activeTabIdAfter);
+    if (reconciled.tabs !== tabs) persistBoardState(reconciled.tabs);
     clearItemSelection();
     setFocusedItemId(prev =>
-      prev && entry.after.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
+      prev && reconciled.tabs.some(t => (t.items || []).some(i => i.id === prev)) ? prev : null
     );
-  }, [persistBoardState, clearItemSelection]);
+    if (reconciled.skipped.length > 0) {
+      showSkipNotice('1 redo step skipped — the board changed');
+    }
+    setUndoCount(undoStackRef.current.length);
+    setRedoCount(redoStackRef.current.length);
+    scheduleHistoryPersist();
+  }, [tabs, persistBoardState, clearItemSelection, showSkipNotice, scheduleHistoryPersist]);
 
   const saveState = useCallback(
     (newItems: BoardItemType[], newConns: Connection[], newAnnotations?: BoardAnnotation[], historyKey?: string) => {
@@ -1594,6 +1708,11 @@ export default function Board({ boardId }: { boardId: string }) {
       {saveError && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-red-600 text-white text-sm text-center py-1.5 px-4">
           {saveError}
+        </div>
+      )}
+      {skipNotice && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-amber-600 text-white text-sm text-center py-1.5 px-4">
+          {skipNotice}
         </div>
       )}
       <Toolbar 

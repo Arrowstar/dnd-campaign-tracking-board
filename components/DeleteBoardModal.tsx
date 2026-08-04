@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { X, AlertTriangle, Trash2, Loader2, AlertCircle, Download, CheckCircle2 } from 'lucide-react';
 import { downloadBoardExport } from '@/lib/exportImport';
+import { clearHistoryForBoard } from '@/lib/undoHistory';
 
 interface DeleteBoardModalProps {
   isOpen: boolean;
@@ -84,6 +85,9 @@ export default function DeleteBoardModal({ isOpen, onClose, boardId }: DeleteBoa
         setError(data?.error || 'Failed to delete the board.');
         return;
       }
+      // Feature 11 — the board is gone for everyone; drop its per-user
+      // undo/redo history keys before leaving.
+      clearHistoryForBoard(boardId);
       window.location.href = '/';
     } catch {
       setError('A network error occurred. Please try again.');
