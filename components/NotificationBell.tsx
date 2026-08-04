@@ -75,7 +75,7 @@ export default function NotificationBell({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-11 z-50 w-80 max-h-[70vh] flex flex-col bg-[#2C2824] border border-[#B58D3D]/50 rounded-xl shadow-2xl text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150 origin-top-right">
+          <div className="absolute right-0 top-11 z-50 w-80 max-w-[calc(100vw-1rem)] max-h-[70vh] flex flex-col bg-[#2C2824] border border-[#B58D3D]/50 rounded-xl shadow-2xl text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150 origin-top-right">
             <div className="flex items-center justify-between px-3 py-2 border-b border-[#B58D3D]/30">
               <span className="text-sm font-bold font-serif italic text-[#B58D3D]">Mentions</span>
               {unreadCount > 0 && (

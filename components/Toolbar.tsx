@@ -142,7 +142,7 @@ export default function Toolbar({
 
   return (
     <div className="relative">
-      <div className="min-h-16 py-1.5 bg-[#2C2824] border-b border-[#B58D3D] flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 xl:px-4 z-50 flex-shrink-0 relative">
+      <div className="min-h-16 py-1.5 bg-[#2C2824] border-b border-[#B58D3D] flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 px-2 xl:px-4 z-50 flex-shrink-0 relative">
         <div className="flex items-center gap-2 xl:gap-3 flex-1">
           <button
             type="button"
