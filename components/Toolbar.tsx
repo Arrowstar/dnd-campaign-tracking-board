@@ -142,8 +142,8 @@ export default function Toolbar({
 
   return (
     <div className="relative">
-      <div className="h-16 bg-[#2C2824] border-b border-[#B58D3D] flex items-center justify-between px-4 z-50 flex-shrink-0 relative">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="h-16 bg-[#2C2824] border-b border-[#B58D3D] flex items-center justify-between px-2 xl:px-4 z-50 flex-shrink-0 relative overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-2 xl:gap-3 min-w-0">
           <button
             type="button"
             onClick={handleLeaveBoard}
@@ -163,7 +163,7 @@ export default function Toolbar({
             </h1>
           </div>
           <div className="h-6 w-px bg-[#B58D3D] opacity-30" />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 hidden lg:flex">
             <span className="text-sm text-[#E0D8D0]">{user.name}</span>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${user.role === 'dm' ? 'bg-[#5D4037] text-white border border-[#B58D3D]' : 'bg-[#4E6E5D] text-white border border-[#4E6E5D]'}`}>
               {user.role.toUpperCase()}
@@ -174,11 +174,11 @@ export default function Toolbar({
             <button
               type="button"
               onClick={onOpenMembersModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs ml-1"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs ml-1 shrink-0 whitespace-nowrap"
               title="View and manage campaign members"
             >
               <Users size={14} className="text-[#B58D3D]" />
-              <span>Members</span>
+              <span className="hidden lg:inline">Members</span>
             </button>
           )}
 
@@ -186,11 +186,11 @@ export default function Toolbar({
             <button
               type="button"
               onClick={onOpenSettingsModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
               title="Account settings & change password"
             >
               <KeyRound size={14} className="text-[#B58D3D]" />
-              <span>Settings</span>
+              <span className="hidden lg:inline">Settings</span>
             </button>
           )}
 
@@ -198,11 +198,11 @@ export default function Toolbar({
             <button
               type="button"
               onClick={onOpenBoardSettings}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
               title="Board-wide settings (card appearance, and more)"
             >
               <Sliders size={14} className="text-[#B58D3D]" />
-              <span>Board</span>
+              <span className="hidden lg:inline">Board</span>
             </button>
           )}
 
@@ -210,26 +210,26 @@ export default function Toolbar({
             <button
               type="button"
               onClick={onOpenShortcutsHelp}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
               title="Keyboard shortcuts (?)"
             >
               <Keyboard size={14} className="text-[#B58D3D]" />
-              <span>Shortcuts</span>
+              <span className="hidden lg:inline">Shortcuts</span>
             </button>
           )}
 
-          <div className="h-6 w-px bg-[#B58D3D] opacity-30" />
+          <div className="h-6 w-px bg-[#B58D3D] opacity-30 shrink-0" />
 
           {onUndo && (
             <button
               type="button"
               onClick={onUndo}
               disabled={!canUndo}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38]"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38] shrink-0 whitespace-nowrap"
               title="Undo last change (Ctrl+Z)"
             >
               <Undo2 size={14} className="text-[#B58D3D]" />
-              <span>Undo</span>
+              <span className="hidden lg:inline">Undo</span>
             </button>
           )}
 
@@ -238,11 +238,11 @@ export default function Toolbar({
               type="button"
               onClick={onRedo}
               disabled={!canRedo}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38]"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#37332F] disabled:hover:border-[#423D38] shrink-0 whitespace-nowrap"
               title="Redo last change (Ctrl+Shift+Z / Ctrl+Y)"
             >
               <Redo2 size={14} className="text-[#B58D3D]" />
-              <span>Redo</span>
+              <span className="hidden lg:inline">Redo</span>
             </button>
           )}
 
@@ -250,30 +250,30 @@ export default function Toolbar({
             <button
               type="button"
               onClick={onOpenSearch}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
               title="Search every card on the board (Ctrl+K)"
             >
               <Search size={14} className="text-[#B58D3D]" />
-              <span>Search</span>
+              <span className="hidden lg:inline">Search</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={handleLeaveBoard}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#37332F] hover:bg-[#423D38] border border-[#423D38] hover:border-[#B58D3D] text-[#E0D8D0] text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
             title="Return to Main Menu"
           >
             <LogOut size={14} className="text-[#B58D3D]" />
-            <span>Leave Board</span>
+            <span className="hidden lg:inline">Leave Board</span>
           </button>
         </div>
 
-        <div className="flex items-center gap-3 px-2">
+        <div className="flex items-center gap-2 xl:gap-3 px-1 xl:px-2 flex-shrink-0">
           {notificationBell}
 
           {/* Annotation Tools Selector */}
-          <div className="flex items-center gap-1 bg-[#37332F] p-1 rounded-lg border border-[#423D38]">
+          <div className="flex items-center gap-1 bg-[#37332F] p-1 rounded-lg border border-[#423D38] flex-shrink-0">
             <span className="text-[10px] font-bold text-[#A89F91] uppercase tracking-wider px-1.5 hidden md:inline">
               Annotations:
             </span>
@@ -332,31 +332,31 @@ export default function Toolbar({
             </div>
           </div>
 
-          <div className="h-6 w-px bg-[#B58D3D] opacity-30" />
+          <div className="h-6 w-px bg-[#B58D3D] opacity-30 shrink-0" />
 
           {/* Connection Trigger & Inline Style Controls */}
-          <div className="flex items-center gap-1 relative">
+          <div className="flex items-center gap-1 relative flex-shrink-0">
             <button
               onClick={() => {
                 if (activeTool) setActiveTool(null);
                 onToggleConnection();
               }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all border shadow-sm cursor-pointer ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all border shadow-sm cursor-pointer shrink-0 whitespace-nowrap ${
                 isAddingConnection 
                   ? 'bg-[#B58D3D] text-white border-[#827717] ring-2 ring-[#B58D3D]/50' 
                   : 'bg-white text-[#423D38] border-[#C9C0B1] hover:bg-[#D9D0C1]'
               }`}
             >
               {isAddingConnection ? <X size={16} /> : <MoveRight size={16} />}
-              <span className="font-bold">{isAddingConnection ? 'Cancel Connect' : 'Connect'}</span>
+              <span className="font-bold hidden lg:inline">{isAddingConnection ? 'Cancel Connect' : 'Connect'}</span>
             </button>
 
             {/* Quick Connection Customizer Button in Toolbar */}
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               <button
                 type="button"
                 onClick={() => setShowConnectSettings(!showConnectSettings)}
-                className={`p-1.5 rounded border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                className={`p-1.5 rounded border transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 ${
                   showConnectSettings || isAddingConnection
                     ? 'bg-[#423D38] border-[#B58D3D] text-[#E0D8D0]'
                     : 'bg-[#37332F] border-transparent text-[#A89F91] hover:text-[#E0D8D0] hover:bg-[#423D38]'
