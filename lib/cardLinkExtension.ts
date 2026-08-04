@@ -6,18 +6,21 @@ import { Node, mergeAttributes } from '@tiptap/core';
  *
  *   <span data-card-id="<uuid>" data-card-type="npc" data-card-title="Zog">Zog</span>
  *
- * The node is deliberately NON-atom inline with `text*` content so the
- * displayed title is real, selectable text — users can edit/delete it, and
- * the server-side rewrite (lib/cardLinks.ts retitleCardLinksInHtml) restores
- * the target's current title snapshot on save. Non-atom also means links can
- * never nest (a card-link span can only contain text), which is what keeps
- * the pure-string rewrite helpers in lib/cardLinks.ts safe.
+ * The node is ATOM: it cannot contain content, so users can never type or
+ * edit text inside a reference — the chip is selected and deleted as a
+ * singular unit (Backspace/Delete removes the whole chip). The displayed
+ * title text is produced from the `data-card-title` snapshot: `renderText`
+ * feeds `editor.getText()` (and matches the non-atom behavior users expect
+ * when reading the document), and `renderHTML` re-emits the title inside the
+ * span so the stored HTML shape is identical to the old non-atom format —
+ * which is what keeps the pure-string rewrite helpers in lib/cardLinks.ts
+ * (and the server-side retitle pass) safe and unchanged.
  */
 export const CardLink = Node.create({
   name: 'cardLink',
   inline: true,
   group: 'inline',
-  content: 'text*',
+  atom: true,
   selectable: true,
 
   addAttributes() {
@@ -47,16 +50,11 @@ export const CardLink = Node.create({
     return [{ tag: 'span[data-card-id]' }];
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['span', mergeAttributes(HTMLAttributes), 0];
+  renderHTML({ node, HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes), node.attrs.title ?? ''];
   },
 
-  addKeyboardShortcuts() {
-    return {
-      // Deleting inside a chip removes the link entirely (the remaining text
-      // lives on) — no special handling needed: Backspace on an empty inline
-      // node's start deletes the node, and the snapshot text is what we want
-      // to keep anyway. Nothing to register.
-    };
+  renderText({ node }) {
+    return node.attrs.title ?? '';
   },
 });

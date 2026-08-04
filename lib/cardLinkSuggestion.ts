@@ -57,7 +57,6 @@ export function createCardLinkSuggestion(getCards: () => CardLinkableItem[]): Ex
                     itemType: item.itemType,
                     title: item.title,
                   },
-                  content: [{ type: 'text', text: item.title }],
                 },
                 { type: 'text', text: ' ' },
               ]).run();

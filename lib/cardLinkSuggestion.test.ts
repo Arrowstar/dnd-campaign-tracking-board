@@ -180,6 +180,35 @@ describe('createCardLinkSuggestion', () => {
     });
   });
 
+  it('chip is an atom node — a singular add/delete unit with no editable content', async () => {
+    editor = await makeEditor(() => CARDS);
+    editor.commands.insertContent('@');
+    await vi.waitFor(() => expect(popupText()).toContain('Lord Nezznar'));
+    pressKey('Enter');
+    await vi.waitFor(() => expect(editor!.getText()).toBe('Lord Nezznar '));
+    let chip: { isAtom: boolean; type: { name: string } } | null = null;
+    editor!.state.doc.descendants(node => {
+      if (node.type.name === 'cardLink') {
+        chip = node;
+        return false;
+      }
+      return true;
+    });
+    expect(chip).toBeTruthy();
+    expect(chip!.isAtom).toBe(true);
+  });
+
+  it('round-trips a stored span: parse restores text and HTML shape stays identical', async () => {
+    editor = await makeEditor(() => CARDS);
+    editor.commands.setContent(
+      '<p>See <span data-card-id="c1" data-card-type="npc" data-card-title="Lord Nezznar">Lord Nezznar</span> for details.</p>'
+    );
+    expect(editor!.getText()).toBe('See Lord Nezznar for details.');
+    expect(editor!.getHTML()).toBe(
+      '<p>See <span data-card-id="c1" data-card-type="npc" data-card-title="Lord Nezznar">Lord Nezznar</span> for details.</p>'
+    );
+  });
+
   it('updates the card list live through the getter (no editor rebuild)', async () => {
     const cards: CardLinkableItem[] = [];
     editor = await makeEditor(() => cards);
