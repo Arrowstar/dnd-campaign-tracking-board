@@ -258,6 +258,8 @@ export default function Toolbar({
             </button>
           )}
 
+          {notificationBell}
+
           <button
             type="button"
             onClick={handleLeaveBoard}
@@ -270,8 +272,6 @@ export default function Toolbar({
         </div>
 
         <div className="flex items-center gap-2 xl:gap-3 px-1 xl:px-2 flex-shrink-0 justify-end">
-          {notificationBell}
-
           {/* Annotation Tools Selector */}
           <div className="flex items-center gap-1 bg-[#37332F] p-1 rounded-lg border border-[#423D38] flex-shrink-0">
             <span className="text-[10px] font-bold text-[#A89F91] uppercase tracking-wider px-1.5 hidden md:inline">
