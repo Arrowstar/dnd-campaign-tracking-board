@@ -270,3 +270,52 @@ describe('mergeTabsForSave — new item ownership', () => {
     expect(merged[0].items[0].ownerId).toBe('u-owner');
   });
 });
+
+// ─── mergeTabsForSave unchanged-item fast path (Feature 12) ──────────────────
+
+describe('mergeTabsForSave — unchanged-item fast path (Feature 12)', () => {
+  it('returns the stored item when the incoming item is identical', () => {
+    const item = makeItem('i1', { ownerId: 'u-owner', comments: [makeComment('c1')] });
+    const stored = oneTab([item]);
+    // Deep-equal copy (a DM's client re-sends untouched items byte-identically).
+    const incoming = oneTab([{ ...item, comments: [makeComment('c1')] }]);
+    const merged = mergeTabsForSave(stored, incoming, dm, new Set(['u-owner']));
+    expect(merged[0].items[0]).toBe(item);
+  });
+
+  it('still restores hidden fields when a player sends a scrubbed item back', () => {
+    const hidden = {
+      id: 'f-hidden',
+      label: 'Secrets',
+      type: 'text' as const,
+      textValue: 'DM-only',
+      visibility: 'dm' as const,
+    };
+    const stored = oneTab([
+      makeItem('i1', { ownerId: 'u-player', ownerName: 'Player One', fields: [hidden] }),
+    ]);
+    // The player's client only ever SAW a scrubbed copy — no hidden fields.
+    const incoming = oneTab([
+      makeItem('i1', { ownerId: 'u-player', ownerName: 'Player One', fields: [] }),
+    ]);
+    const merged = mergeTabsForSave(stored, incoming, player, new Set(['u-player']));
+    expect(merged[0].items[0].fields).toEqual([hidden]);
+  });
+
+  it('still applies comment merging when the incoming item differs', () => {
+    const stored = oneTab([
+      makeItem('i1', { ownerId: 'u-player', comments: [makeComment('c1')] }),
+    ]);
+    const incoming = oneTab([
+      {
+        ...makeItem('i1', { ownerId: 'u-player' }),
+        title: 'edited',
+        comments: [makeComment('c1'), makeComment('c2')],
+      },
+    ]);
+    const merged = mergeTabsForSave(stored, incoming, player, new Set(['u-player']));
+    expect(merged[0].items[0].title).toBe('edited');
+    expect(merged[0].items[0].comments.map((c) => c.id)).toEqual(['c1', 'c2']);
+    expect(merged[0].items[0].comments[1].userId).toBe('u-player');
+  });
+});

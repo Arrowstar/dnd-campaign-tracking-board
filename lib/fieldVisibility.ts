@@ -1,4 +1,5 @@
 import { BoardItem, BoardTab, Comment, ItemField, User, Visibility } from './types';
+import { isEqual } from './undoHistory';
 
 /**
  * Per-field visibility helpers.
@@ -150,6 +151,13 @@ export function mergeTabsForSave(
       items: (incomingTab.items || []).map((inItem) => {
         const stItem = storedTab.items?.find((i) => i.id === inItem.id);
         if (!stItem) return enforceNewItemOwnership(inItem, user, memberIds);
+
+        // Feature 12 — unchanged-item fast path: the incoming item is identical
+        // to the stored one, so no visibility/ownership/comment work can apply.
+        // (A player client's copy of an item with hidden fields always DIFFERS
+        // from the stored item — the scrub on GET strips the hidden content —
+        // so the restore logic below still fires exactly when needed.)
+        if (isEqual(inItem, stItem)) return stItem;
 
         // Non-owner, non-DM: only comments may change.
         if (user.role !== 'dm' && stItem.ownerId !== user.id) {
