@@ -97,6 +97,17 @@ describe('sanitizeRichTextServer', () => {
     expect(out).toBe('<p>@jo</p>');
   });
 
+  it('keeps card-link data attributes on spans (Feature 10)', () => {
+    const out = sanitizeRichTextServer(
+      '<p><span data-card-id="abc-123" data-card-type="npc" data-card-title="Zog" class="card-link" title="Zog">Zog</span></p>'
+    );
+    expect(out).toContain('data-card-id="abc-123"');
+    expect(out).toContain('data-card-type="npc"');
+    expect(out).toContain('data-card-title="Zog"');
+    expect(out).not.toContain('class="card-link"');
+    expect(out).not.toContain(' title="Zog"');
+  });
+
   it('drops unknown tags but keeps their text', () => {
     expect(sanitizeRichTextServer('<p>before<custom-tag onclick="x()">inner</custom-tag>after</p>'))
       .toBe('<p>beforeinnerafter</p>');
@@ -121,6 +132,15 @@ describe('client DOMPurify sanitization', () => {
     const out = sanitize('<p>hey <span class="mention-pill">@jo</span> and <a href="https://ok">link</a></p>');
     expect(out).toContain('class="mention-pill"');
     expect(out).toContain('<p>hey');
+  });
+
+  it('keeps card-link data attributes and the render-time class (Feature 10)', () => {
+    const out = sanitize(
+      '<p><span data-card-id="abc-123" data-card-type="location" data-card-title="Cave">Cave</span></p>'
+    );
+    expect(out).toContain('data-card-id="abc-123"');
+    expect(out).toContain('data-card-type="location"');
+    expect(out).toContain('data-card-title="Cave"');
   });
 
   it('keeps alignment styles but drops disallowed style properties', () => {

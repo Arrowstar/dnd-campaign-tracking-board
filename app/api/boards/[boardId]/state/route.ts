@@ -3,6 +3,7 @@ import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth';
 import { scrubTabsForUser, mergeTabsForSave } from '@/lib/fieldVisibility';
 import { syncLinkTitles } from '@/lib/crossref';
+import { syncRichTextCardLinks } from '@/lib/cardLinks';
 import { mergeTagDefs } from '@/lib/tags';
 import { sanitizeTabsForSave } from '@/lib/sanitize.server';
 import {
@@ -87,7 +88,11 @@ export async function POST(
         memberIds
       );
       // Keep link-token title snapshots in sync with item titles.
-      const synced = syncLinkTitles(merged);
+      let synced = syncLinkTitles(merged);
+      // Feature 10 — authoritative rich-text card-link pass: unwrap links to
+      // deleted items, retitle links to renamed ones. Runs server-side so a
+      // stale client can never persist a dead card link.
+      synced = syncRichTextCardLinks(synced);
       // Allowlist-sanitize every rich-text slot (item content, field text
       // values, comments) before it can reach the DB (Security-Audit.md #2).
       const sanitized = sanitizeTabsForSave(synced);

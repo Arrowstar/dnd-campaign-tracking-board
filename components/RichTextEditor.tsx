@@ -53,6 +53,9 @@ import { sanitizeRichText } from '@/lib/sanitize';
 import UploadProgress from './UploadProgress';
 import { MentionableMember } from './MentionAutocomplete';
 import { createMentionSuggestion } from '@/lib/mentionSuggestion';
+import { CardLink } from '@/lib/cardLinkExtension';
+import { createCardLinkSuggestion } from '@/lib/cardLinkSuggestion';
+import { CardLinkableItem, decorateCardLinks } from '@/lib/cardLinks';
 
 interface RichTextEditorProps {
   value: string;
@@ -67,6 +70,12 @@ interface RichTextEditorProps {
    * autocomplete; selecting a member inserts a plain `@username` mention.
    */
   mentions?: MentionableMember[];
+  /**
+   * Feature 10 — when provided, typing `@` in this editor shows a board-item
+   * card autocomplete; selecting an item inserts a card-link chip. Mutually
+   * exclusive with `mentions` per editor (both trigger on `@`).
+   */
+  cards?: CardLinkableItem[];
   /**
    * Board the editor belongs to. Required for image uploads — the server
    * verifies membership before issuing an upload token
@@ -160,6 +169,7 @@ export function RichTextEditor({
   compact = false,
   disabled = false,
   mentions,
+  cards,
   boardId,
 }: RichTextEditorProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -182,12 +192,21 @@ export function RichTextEditor({
   mentionsRef.current = mentions || [];
   const mentionSuggestionExtension = createMentionSuggestion(() => mentionsRef.current);
 
+  // Feature 10 — @ card-link autocomplete. Same live-getter pattern as the
+  // mention extension above; empty list = plugin stays inert. Registering
+  // BOTH suggestion extensions on one editor is safe because each triggers
+  // only when its own getter returns candidates.
+  const cardsRef = useRef<CardLinkableItem[]>(cards || []);
+  cardsRef.current = cards || [];
+  const cardLinkSuggestionExtension = createCardLinkSuggestion(() => cardsRef.current);
+
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
     content: value || '',
     extensions: [
       StarterKit,
+      CardLink,
       TextStyleKit.configure({
         color: { types: ['textStyle'] },
         fontSize: { types: ['textStyle'] },
@@ -201,6 +220,7 @@ export function RichTextEditor({
       TableHeader,
       TableCell,
       mentionSuggestionExtension,
+      cardLinkSuggestionExtension,
     ],
     editorProps: {
       attributes: getEditorAttributes(isLight, compact),
@@ -631,7 +651,23 @@ export function RichTextEditor({
   );
 }
 
-export function RichTextDisplay({ content, className = '' }: { content: string; className?: string }) {
+export function RichTextDisplay({
+  content,
+  className = '',
+  items,
+  onScrollToItem,
+}: {
+  content: string;
+  className?: string;
+  /**
+   * Feature 10 — when provided, card-link spans referencing live items are
+   * decorated as clickable chips (links to deleted items degrade to plain
+   * text). Omit for contexts without an item set (comments, legacy display).
+   */
+  items?: CardLinkableItem[];
+  /** Called when a card-link chip is clicked (pan/zoom to the target). */
+  onScrollToItem?: (itemId: string) => void;
+}) {
   if (!content) return null;
 
   // Check if content string contains HTML tags
@@ -640,11 +676,21 @@ export function RichTextDisplay({ content, className = '' }: { content: string; 
   // Defense-in-depth: DOMPurify allowlist before injecting, even though the
   // server scrubs on write (covers legacy/imported content — Security-Audit.md #2).
   const safeHtml = sanitizeRichText(formattedHtml);
+  // Render-time chip decoration runs AFTER sanitization (the class/title attrs
+  // are cosmetic and must not be persisted back into storage).
+  const displayHtml = items
+    ? decorateCardLinks(safeHtml, new Set(items.map((i) => i.id)))
+    : safeHtml;
 
   return (
     <div
       className={`rich-text-content break-words ${className}`}
-      dangerouslySetInnerHTML={{ __html: safeHtml }}
+      dangerouslySetInnerHTML={{ __html: displayHtml }}
+      onClick={(e) => {
+        if (!onScrollToItem) return;
+        const el = (e.target as HTMLElement).closest('[data-card-id]');
+        if (el) onScrollToItem(el.getAttribute('data-card-id') || '');
+      }}
     />
   );
 }

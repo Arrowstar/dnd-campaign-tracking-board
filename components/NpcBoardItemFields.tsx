@@ -132,8 +132,16 @@ export default function NpcBoardItemFields({
   user,
   canEdit,
   isLight,
-  onUpdate
+  onUpdate,
+  allItems = [],
+  onScrollToItem,
 }: NpcBoardItemFieldsProps) {
+  // Feature 10 — @ card-link vocabulary for rich-text fields.
+  const cards = React.useMemo(
+    () => allItems.map(i => ({ id: i.id, title: i.title, itemType: i.type })),
+    [allItems]
+  );
+
   // Migration logic to consolidate individual trait fields into Personality & Traits box
   useEffect(() => {
     if (!item.fields || item.fields.length === 0) {
@@ -726,6 +734,7 @@ export default function NpcBoardItemFields({
                 isLight={isLight}
                 compact={false}
                 className="w-full"
+                cards={cards}
                 boardId={user.boardId}
               />
               <div className="flex justify-end pt-1">
@@ -755,7 +764,7 @@ export default function NpcBoardItemFields({
               title={canEdit ? 'Click to edit additional traits & details' : undefined}
             >
               {traits.other ? (
-                <RichTextDisplay content={traits.other} />
+                <RichTextDisplay content={traits.other} items={cards} onScrollToItem={onScrollToItem} />
               ) : (
                 <span className="text-[#8C7B6E]/60 italic flex items-center gap-1 py-1">
                   <Edit3 size={11} className="opacity-70" />
@@ -940,6 +949,7 @@ export default function NpcBoardItemFields({
                           isLight={isLight}
                           compact={false}
                           className="w-full"
+                          cards={cards}
                           boardId={user.boardId}
                         />
                         <div className="flex justify-end pt-1">
@@ -969,7 +979,7 @@ export default function NpcBoardItemFields({
                         title={canEdit ? `Click to edit ${field.label.toLowerCase()}` : undefined}
                       >
                         {field.textValue ? (
-                          <RichTextDisplay content={field.textValue} />
+                          <RichTextDisplay content={field.textValue} items={cards} onScrollToItem={onScrollToItem} />
                         ) : (
                           <span className="text-[#8C7B6E]/60 italic flex items-center gap-1 py-1">
                             <Edit3 size={11} className="opacity-70" />

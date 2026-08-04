@@ -21,6 +21,7 @@ const SERVER_ALLOWED_ATTRS: Record<string, string[]> = {
   '*': ['style'],
   a: ['href', 'title', 'target', 'rel'],
   img: ['src', 'alt', 'title', 'width', 'height'],
+  span: ['data-card-id', 'data-card-type', 'data-card-title'],
   th: ['colspan', 'rowspan', 'align'],
   td: ['colspan', 'rowspan', 'align'],
   tr: ['align'],

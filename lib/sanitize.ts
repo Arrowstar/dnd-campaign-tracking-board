@@ -34,12 +34,16 @@ export const RICH_TEXT_ALLOWED_TAGS = [
 
 export const RICH_TEXT_ALLOWED_ATTRS = [
   'style',
-  // class is render-time only (mention-pill, rt-preview-*): harmless cosmetics,
-  // kept so highlightMentions() and flattenRichTextForPreview() survive.
+  // class is render-time only (mention-pill, card-link, rt-preview-*): harmless
+  // cosmetics, kept so highlightMentions() / decorateCardLinks() /
+  // flattenRichTextForPreview() survive.
   'class',
   'href', 'target', 'rel', 'title',
   'src', 'alt', 'width', 'height',
   'colspan', 'rowspan', 'align',
+  // Feature 10 — card-link spans: the referenced item id (UUID), its type
+  // (npc/location/quest/…) and the title snapshot the link displays.
+  'data-card-id', 'data-card-type', 'data-card-title',
 ];
 
 /**

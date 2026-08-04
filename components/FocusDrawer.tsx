@@ -173,6 +173,14 @@ export default function FocusDrawer({
     [members]
   );
 
+  // Feature 10 — @ card-link autocomplete vocabulary + display context for
+  // rich-text slots: every board item, including the item being edited (the
+  // picker excludes nothing — self-links are allowed).
+  const cards = useMemo(
+    () => allItems.map(i => ({ id: i.id, title: i.title, itemType: i.type })),
+    [allItems]
+  );
+
   // ── Resize handle ──────────────────────────────────────────────────────────
   const resizeRef = useRef<boolean>(false);
   const startXRef = useRef(0);
@@ -454,6 +462,7 @@ export default function FocusDrawer({
                     placeholder={`Enter ${item.type} details...`}
                     isLight={true}
                     className="w-full"
+                    cards={cards}
                     boardId={user.boardId}
                   />
                 </div>
@@ -461,7 +470,7 @@ export default function FocusDrawer({
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E]">Content</label>
                   <div className="bg-white border border-[#D9D0C1] rounded-lg p-3 text-sm text-[#2C2824] leading-relaxed">
-                    <RichTextDisplay content={item.content || ''} />
+                    <RichTextDisplay content={item.content || ''} items={cards} onScrollToItem={onScrollToItem} />
                   </div>
                 </div>
               )}

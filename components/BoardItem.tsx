@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, memo, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { BoardItem as BoardItemType, User, ItemField, Visibility, PreviewFieldSlot, PreviewLayout, PreviewFieldMode, TagDef } from '@/lib/types';
 import { canViewField } from '@/lib/fieldVisibility';
@@ -27,6 +27,7 @@ import {
   getColumnWidths,
 } from './previewLayout';
 import { getPlainText } from '@/lib/crossref';
+import { decorateCardLinks } from '@/lib/cardLinks';
 import AnnotatedImagePreview from './AnnotatedImagePreview';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,7 +409,7 @@ function imagePreviewClasses(mode: Exclude<PreviewFieldMode, 'auto'>): {
   };
 }
 
-function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fontScale }: {
+function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fontScale, allItems, onScrollToItem }: {
   slot: PreviewFieldSlot;
   item: BoardItemType;
   user: User;
@@ -419,9 +420,17 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fo
   columns: PreviewLayout['columns'];
   /** Board-wide card text scale multiplier */
   fontScale: number;
+  /** Feature 10 — all board items (chip decoration + click-to-jump). */
+  allItems?: BoardItemType[];
+  /** Called when a card-link chip is clicked (pan/zoom to the target). */
+  onScrollToItem?: (id: string) => void;
 }) {
   const { fieldId } = slot;
   const fontScalePx = (px: number) => px * fontScale;
+  // Feature 10 — chip decoration for card-link spans in text previews
+  // (render-time only; clicks jump to the target instead of opening the
+  // drawer). Hoisted above the early returns — hooks must be unconditional.
+  const liveIds = useMemo(() => new Set((allItems || []).map(i => i.id)), [allItems]);
 
   // ── image-type board items store their content in item.content ──
   if (item.type === 'image' && fieldId === '__image_content__') {
@@ -579,6 +588,10 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fo
   const plain = rawValue ? getPlainText(rawValue || '') : '';
   const previewHtml = plain ? flattenRichTextForPreview(plain) : '';
   if (!previewHtml.replace(/<[^>]*>/g, '').trim()) return null;
+  // Feature 10 — decorate card-link spans as chips (render-time only).
+  const decoratedHtml = previewHtml.includes('data-card-id')
+    ? decorateCardLinks(previewHtml, liveIds)
+    : previewHtml;
   const clamp = resolveClampLines(slot, mode);
   return (
     <div style={spanStyle} className="flex flex-col gap-0.5 justify-between min-h-0">
@@ -596,8 +609,15 @@ function PreviewField({ slot, item, user, fieldDefs, resolvedFields, columns, fo
             overflow: 'hidden',
           } : undefined),
         }}
+        onClick={(e) => {
+          const el = (e.target as HTMLElement).closest('[data-card-id]');
+          if (el && onScrollToItem) {
+            e.stopPropagation();
+            onScrollToItem(el.getAttribute('data-card-id') || '');
+          }
+        }}
       >
-        <span dangerouslySetInnerHTML={{ __html: previewHtml }} />
+        <span dangerouslySetInnerHTML={{ __html: decoratedHtml }} />
       </p>
     </div>
   );
@@ -1450,7 +1470,7 @@ export default memo(function BoardItem({
           onPointerDownCapture={e => e.stopPropagation()}
         >
           {previewLayout.rows.map(slot => (
-            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} fontScale={fontScale} />
+            <PreviewField key={slot.fieldId} slot={slot} item={item} user={user} fieldDefs={fieldDefs} resolvedFields={resolvedFields} columns={previewLayout.columns} fontScale={fontScale} allItems={allItems} onScrollToItem={onScrollToItem} />
           ))}
           {/* Subtle hover gradient */}
           <div className="absolute inset-0 rounded-[5px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"

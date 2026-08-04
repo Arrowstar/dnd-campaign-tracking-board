@@ -242,9 +242,14 @@ export default function StructuredBoardItemFields({
       ? item.fields
       : buildDefaultFields(fieldDefs, item.content);
 
+  // Feature 10 — @ card-link vocabulary for rich-text field editors.
+  const cards = React.useMemo(
+    () => allItems.map(i => ({ id: i.id, title: i.title, itemType: i.type })),
+    [allItems]
+  );
+
   // ── State ─────────────────────────────────────────────────────────────────
-  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
-  const [editingStructuredKey, setEditingStructuredKey] = useState<{ fieldId: string; key: string } | null>(null);
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);  const [editingStructuredKey, setEditingStructuredKey] = useState<{ fieldId: string; key: string } | null>(null);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [labelInput, setLabelInput] = useState('');
   const [showAddField, setShowAddField] = useState(false);
@@ -1187,6 +1192,7 @@ export default function StructuredBoardItemFields({
             isLight={isLight}
             compact={false}
             className="w-full"
+            cards={cards}
             boardId={user.boardId}
           />
           <div className="flex justify-end pt-1">
@@ -1204,7 +1210,7 @@ export default function StructuredBoardItemFields({
           title={canEdit ? `Click to edit ${field.label.toLowerCase()}` : undefined}
         >
           {field.textValue ? (
-            <RichTextDisplay content={field.textValue} />
+            <RichTextDisplay content={field.textValue} items={cards} onScrollToItem={onScrollToItem} />
           ) : (
             <span className="text-[#8C7B6E]/60 italic flex items-center gap-1 py-1">
               <Edit3 size={11} className="opacity-70" /><span>Add {field.label.toLowerCase()}...</span>

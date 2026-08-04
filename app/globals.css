@@ -20,6 +20,27 @@ body {
   white-space: nowrap;
 }
 
+/* Feature 10 — card-link chips inside rendered rich text (display + previews).
+   Added render-time by decorateCardLinks(), so this class never reaches storage. */
+.card-link {
+  background: rgba(181, 141, 61, 0.14);
+  color: #8a6420;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 3px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.card-link:hover {
+  background: rgba(181, 141, 61, 0.28);
+  text-decoration: underline;
+  text-decoration-color: rgba(181, 141, 61, 0.6);
+}
+
 .react-transform-component {
   width: 100% !important;
   height: 100% !important;

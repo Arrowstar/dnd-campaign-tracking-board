@@ -17,6 +17,7 @@ import { getDefaultNpcFields } from './NpcBoardItemFields';
 import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon } from 'lucide-react';
 import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles } from '@/lib/crossref';
+import { syncRichTextCardLinks } from '@/lib/cardLinks';
 import { allTagNames, tagColor, isLightColor } from '@/lib/tags';
 import UploadProgress from './UploadProgress';
 import UserSettingsModal from './UserSettingsModal';
@@ -785,7 +786,11 @@ export default function Board({ boardId }: { boardId: string }) {
 
       // Keep link-token title snapshots in sync with item titles so the UI
       // (and the persisted copy) reflect renames immediately.
-      const syncedTabs = syncLinkTitles(updatedTabs);
+      let syncedTabs = syncLinkTitles(updatedTabs);
+      // Feature 10 — same pass for rich-text card links: unwrap links to
+      // deleted items, retitle links to renamed ones (instant UI feedback;
+      // the server re-runs this authoritatively in the state-save route).
+      syncedTabs = syncRichTextCardLinks(syncedTabs);
 
       // Record the before/after pair for undo/redo (before the state lands).
       recordHistory(tabs, syncedTabs, historyKey ?? `mutation-${++uniqueMutationRef.current}`);

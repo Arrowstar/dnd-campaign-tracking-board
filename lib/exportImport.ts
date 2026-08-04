@@ -15,6 +15,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BoardExportFile, BoardTab, Comment, ItemType, FieldType } from './types';
 import { remapLinksInValue } from './crossref';
+import { remapCardLinksInValue } from './cardLinks';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation constants (single source of truth)
@@ -292,7 +293,9 @@ export function buildIdMap(payload: BoardExportFile): Map<string, string> {
 
 /**
  * Rewrite every item id plus every reference to one: connection endpoints,
- * annotation pins, and cross-link tokens inside structured field values.
+ * annotation pins, cross-link tokens inside structured field values, and
+ * Feature 10 card links inside rich-text slots (item content + field text
+ * values, direct HTML or structured-JSON sub-values).
  * Tab ids are kept as-is (tabs are scoped to a board). Pins whose itemId has
  * no mapping are left untouched rather than silently dropped.
  */
@@ -300,8 +303,11 @@ export function remapBoardIds(payload: BoardExportFile, idMap: Map<string, strin
   const remapItem = (item: BoardExportFile['tabs'][number]['items'][number]) => ({
     ...item,
     id: idMap.get(item.id) ?? item.id,
+    content: item.content ? remapCardLinksInValue(item.content, idMap) : item.content,
     fields: (item.fields || []).map((f) =>
-      f.textValue !== undefined ? { ...f, textValue: remapLinksInValue(f.textValue, idMap) } : f
+      f.textValue !== undefined
+        ? { ...f, textValue: remapLinksInValue(remapCardLinksInValue(f.textValue, idMap), idMap) }
+        : f
     ),
   });
 

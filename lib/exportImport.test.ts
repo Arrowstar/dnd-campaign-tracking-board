@@ -362,6 +362,30 @@ describe('remapBoardIds', () => {
     );
   });
 
+  it('remaps Feature 10 card links in item content and field text values', () => {
+    const payload = makePayload() as any;
+    const cardSpan = (id: string) =>
+      `<span data-card-id="${id}" data-card-type="npc" data-card-title="Zog">Zog</span>`;
+    payload.tabs[0].items[0].content = `<p>Knows ${cardSpan('item-a')}</p>`;
+    payload.tabs[0].items[0].fields = [
+      { id: 'f1', label: 'Allies', type: 'text', textValue: `<p>${cardSpan('item-a')} ${cardSpan('item-b')}</p>` },
+    ];
+
+    const idMap = new Map<string, string>([
+      ['item-a', '00000000-0000-4000-8000-000000000001'],
+      ['item-b', '00000000-0000-4000-8000-000000000002'],
+    ]);
+    const remapped = remapBoardIds(payload as BoardExportFile, idMap);
+
+    expect(remapped.tabs[0].items[0].content).toBe(
+      `<p>Knows <span data-card-id="00000000-0000-4000-8000-000000000001" data-card-type="npc" data-card-title="Zog">Zog</span></p>`
+    );
+    expect(remapped.tabs[0].items[0].fields![0].textValue).toBe(
+      `<p><span data-card-id="00000000-0000-4000-8000-000000000001" data-card-type="npc" data-card-title="Zog">Zog</span> ` +
+      `<span data-card-id="00000000-0000-4000-8000-000000000002" data-card-type="npc" data-card-title="Zog">Zog</span></p>`
+    );
+  });
+
   it('keeps tab ids as-is', () => {
     const payload = makePayload() as any;
     const remapped = remapBoardIds(payload as BoardExportFile, new Map([['item-a', 'new-a']]));
