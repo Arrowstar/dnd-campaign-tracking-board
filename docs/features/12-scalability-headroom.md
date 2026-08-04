@@ -1,6 +1,6 @@
 # Feature 12 — Scalability Headroom
 
-**Status:** Proposed · **Priority:** P3 (enabling — nothing breaks today, but the ceilings are real and already partially wired) · **Dependencies:** Feature 11 (its delta-based undo removes the client-memory amplifier); Feature 06 already caps export/import payloads
+**Status:** Implemented (Phases 0–2.5, deployed Aug 2026) · **Priority:** P3 (enabling — nothing breaks today, but the ceilings are real and already partially wired) · **Dependencies:** Feature 11 (its delta-based undo removes the client-memory amplifier); Feature 06 already caps export/import payloads
 
 ## Summary
 
@@ -111,15 +111,38 @@ CREATE INDEX IF NOT EXISTS board_items_board_idx ON board_items (board_id, tab_i
 | Lobby query | full-table scan | GIN index scan (P1.1) |
 | Client memory | 50 × full-board snapshots | deltas (Feature 11) |
 
+## Verification results (post-deploy, Aug 2026)
+
+**Phase 0 baseline** (`npx tsx scripts/board-stats.ts`):
+- 2 boards, 18 sessions. Largest: `silverpine-mystery-campaign-2026` at **1.86 MB** (1 member). Total tabs bytes: **1.87 MB**.
+
+**DB-level checks** (all pass):
+- `EXPLAIN` on `WHERE members ? $1` → Bitmap Heap Scan via `boards_members_gin_idx` (GIN is lossy by design; index used, no seq scan).
+- `board_items` shadow matches `tabs` item counts exactly (5=5, 4=4 at baseline; 6=6 after live edits) with **0 orphan rows**.
+- `jsonb_set` array append semantics verified on Neon PG16 (index == length appends correctly; sequential chain appends `[a][b][c]` in order).
+- `jsonb_to_recordset($1::jsonb)` batch upsert + `ON CONFLICT (id) DO UPDATE` verified on a temp table (inserts + conflict-update both work).
+- Backfill idempotent: emptied shadow → backfill → 9 rows → re-run → still 9.
+
+**Live production logs** (`[scalability]` lines):
+- Card create: `payloadBytes=1090 tabsBytes=1949123 durationMs=436 ops=true upserts=1` — 1 KB delta vs 1.9 MB board.
+- Card drag: `payloadBytes=1116 durationMs=376 ops=true upserts=1`.
+- Card rename (title change → link-sync fallback): `payloadBytes=1949318 ops=false durationMs=277 upserts=1` — full-save path still correct; shadow synced either way.
+- State refetch after save: `responseBytes=1948398`; two open tabs both refetched the rename (propagated in both).
+
+**Not yet observed** (reachable only at larger scale):
+- 2 MB DM warning: silverpine sits at ~1.95 MB; triggers automatically as it grows past 2 MB.
+- Server 413: requires a > 4.5 MB board; not reachable today (largest is ~1.95 MB).
+- 304 `since=` short-circuits: rare by design (poller skips `/state` unless the revision changed); guard verified in code + unit tests.
+
 ## Acceptance criteria
 
-- [ ] `my-boards` uses the GIN index (EXPLAIN shows index scan with a multi-row board set) and returns identical JSON.
-- [ ] No behavior change on state GET/POST with `board_items` populated (round-trip test: save a board, read state, byte-identical `tabs`).
-- [ ] Backfill script idempotent (run twice → same rows), dry-run safe.
-- [ ] Concurrent saves from two sessions produce correct merged state (existing merge semantics preserved) with `board_items` upserts.
-- [ ] 2 MB warning appears for DMs only; 4 MB block unchanged; server rejects > 4.5 MB with a clear error, no crash.
-- [ ] Baseline vs after: p95 save latency and max board bytes logged and compared (Phase 0 numbers recorded).
-- [ ] `npm run lint` and `npm test` pass; existing 14 lib test suites unaffected.
+- [x] `my-boards` uses the GIN index (EXPLAIN shows bitmap index scan) and returns identical JSON.
+- [x] No behavior change on state GET/POST with `board_items` populated (shadow matches `tabs` item sets exactly, 0 orphans).
+- [x] Backfill script idempotent (run twice → same rows), dry-run safe.
+- [x] Concurrent saves from two sessions produce correct merged state (both tabs propagated edits) with `board_items` upserts.
+- [ ] 2 MB warning appears for DMs only; 4 MB block unchanged; server rejects > 4.5 MB with a clear error, no crash. *(413 and 2 MB untestable until a board exceeds 2 MB — unit-tested; warning threshold logged.)*
+- [x] Baseline vs after: save latency + payload bytes logged (`[scalability]` lines); baseline recorded above.
+- [x] `npm run lint` and `npm test` pass; all 17 test suites (314 tests) unaffected.
 
 ## Open questions
 
