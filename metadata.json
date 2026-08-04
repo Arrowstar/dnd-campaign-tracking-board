@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Mythos Canvas — collaborative D&D campaign tracking board",
+  "description": "Mythos Canvas is a collaborative campaign tracking board for tabletop role-playing games — boards of cards with rich-text notes, images, connections, tags, quest/session tracking, and real-time sharing.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

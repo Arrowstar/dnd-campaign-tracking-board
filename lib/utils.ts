@@ -249,7 +249,7 @@ export interface UploadFileOptions {
   onProgress?: (percent: number) => void;
 }
 
-const MAX_FILE_BYTES = 40 * 1024 * 1024; // must match app/api/upload/route.ts
+export const MAX_FILE_BYTES = 40 * 1024 * 1024;
 
 /**
  * Uploads a file directly from the browser to blob storage (Vercel Blob) and

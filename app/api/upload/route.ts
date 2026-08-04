@@ -3,8 +3,7 @@ import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureSchema } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth';
-
-const MAX_FILE_BYTES = 40 * 1024 * 1024; // 40 MB
+import { MAX_FILE_BYTES } from '@/lib/utils';
 
 /**
  * Content types the app actually uses for uploads (board images, portraits,
