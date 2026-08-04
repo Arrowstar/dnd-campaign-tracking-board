@@ -214,7 +214,7 @@ export default function Board({ boardId }: { boardId: string }) {
   const [itemDimensions, setItemDimensions] = useState<Record<string, { width: number; height: number }>>({});
 
   const getViewportSize = () => {
-    const boardContainer = document.querySelector('.absolute.inset-0.top-16') as HTMLElement | null;
+    const boardContainer = document.getElementById('board-canvas') as HTMLElement | null;
     return {
       width: boardContainer ? boardContainer.clientWidth : (typeof window !== 'undefined' ? window.innerWidth : 1200),
       height: boardContainer ? boardContainer.clientHeight : (typeof window !== 'undefined' ? (window.innerHeight - 64) : 800),
@@ -1369,7 +1369,7 @@ export default function Board({ boardId }: { boardId: string }) {
       return true;
     });
 
-    const boardContainer = document.querySelector('.absolute.inset-0.top-16') as HTMLElement | null;
+    const boardContainer = document.getElementById('board-canvas') as HTMLElement | null;
     const viewportW = boardContainer ? boardContainer.clientWidth : (typeof window !== 'undefined' ? window.innerWidth : 1200);
     const viewportH = boardContainer ? boardContainer.clientHeight : (typeof window !== 'undefined' ? (window.innerHeight - 64) : 800);
 
@@ -1933,6 +1933,7 @@ export default function Board({ boardId }: { boardId: string }) {
       <div className="flex-1 relative flex overflow-hidden">
         <ItemSidebar onAddItem={handleAddItem} />
         <div
+          id="board-canvas"
           className="flex-1 h-full relative overflow-hidden flex"
           onDragEnter={(e) => {
             e.preventDefault();

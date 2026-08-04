@@ -142,8 +142,8 @@ export default function Toolbar({
 
   return (
     <div className="relative">
-      <div className="h-16 bg-[#2C2824] border-b border-[#B58D3D] flex items-center justify-between px-2 xl:px-4 z-50 flex-shrink-0 relative overflow-x-auto scrollbar-none">
-        <div className="flex items-center gap-2 xl:gap-3 min-w-0">
+      <div className="min-h-16 py-1.5 bg-[#2C2824] border-b border-[#B58D3D] flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2 xl:px-4 z-50 flex-shrink-0 relative">
+        <div className="flex items-center gap-2 xl:gap-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={handleLeaveBoard}
@@ -269,7 +269,7 @@ export default function Toolbar({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 xl:gap-3 px-1 xl:px-2 flex-shrink-0">
+        <div className="flex items-center gap-2 xl:gap-3 px-1 xl:px-2 flex-shrink-0 justify-end">
           {notificationBell}
 
           {/* Annotation Tools Selector */}
@@ -396,7 +396,7 @@ export default function Toolbar({
             onClick={() => setShowAnnSettings(false)} 
           />
           <div
-            className="fixed top-16 right-4 sm:right-16 z-50 w-96 max-h-[85vh] overflow-y-auto bg-[#2C2824] border border-[#B58D3D] rounded-xl shadow-2xl p-4 text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150"
+            className="absolute top-full right-2 sm:right-4 z-50 w-96 max-h-[85vh] overflow-y-auto bg-[#2C2824] border border-[#B58D3D] rounded-xl shadow-2xl p-4 text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -914,7 +914,7 @@ export default function Toolbar({
             onClick={() => setShowConnectSettings(false)} 
           />
           <div 
-            className="fixed top-16 right-4 sm:right-16 z-50 w-80 bg-[#2C2824] border border-[#B58D3D] rounded-xl shadow-2xl p-4 text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150"
+            className="absolute top-full right-2 sm:right-4 z-50 w-80 bg-[#2C2824] border border-[#B58D3D] rounded-xl shadow-2xl p-4 text-[#E0D8D0] font-sans text-xs animate-in fade-in zoom-in-95 duration-150"
             onPointerDown={e => e.stopPropagation()}
             onClick={e => e.stopPropagation()}
           >
