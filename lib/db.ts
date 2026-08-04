@@ -112,6 +112,34 @@ export async function ensureSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS board_shares_board_idx
       ON board_shares (board_id);
   `;
+
+  // Feature 12 — scalability. GIN index lets the lobby query
+  // (`WHERE members ? $userId`) do a per-user index scan instead of a
+  // full-table scan + client-side filter (boards.ts members JSONB is keyed by
+  // user id).
+  await sql`
+    CREATE INDEX IF NOT EXISTS boards_members_gin_idx
+      ON boards USING GIN (members);
+  `;
+
+  // Feature 12 — per-item write-optimized shadow of tabs[].items[]. Item
+  // uuids are unique board-wide, so id is the natural primary key. board
+  // deletion cascades via the FK. `boards.tabs` stays the source of truth for
+  // reads; this table only powers O(changed items) saves (Phase 2) and the
+  // client item-delta path (Phase 2.5).
+  await sql`
+    CREATE TABLE IF NOT EXISTS board_items (
+      id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      tab_id TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS board_items_board_idx
+      ON board_items (board_id, tab_id);
+  `;
 }
 
 // Old name, kept so nothing else in the app has to change.

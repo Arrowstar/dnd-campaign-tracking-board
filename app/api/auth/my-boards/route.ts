@@ -11,15 +11,15 @@ export async function GET(request: NextRequest) {
 
     await ensureSchema();
     const sql = getSql();
-    const rows = await sql`SELECT id, members FROM boards`;
+    // Feature 12 — resolve membership via the JSONB `?` operator (GIN index
+    // scan) instead of pulling every board and filtering in JS.
+    const rows = await sql`SELECT id, members FROM boards WHERE members ? ${user.id}`;
 
-    const boards = rows
-      .filter((r: any) => r.members && r.members[user.id])
-      .map((r: any) => ({
-        boardId: r.id,
-        role: r.members[user.id].role,
-        joinedAt: r.members[user.id].joinedAt,
-      }));
+    const boards = rows.map((r: any) => ({
+      boardId: r.id,
+      role: r.members[user.id].role,
+      joinedAt: r.members[user.id].joinedAt,
+    }));
 
     return NextResponse.json({ boards });
   } catch (err) {
