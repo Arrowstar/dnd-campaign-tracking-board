@@ -304,3 +304,30 @@ export function syncLinkTitles(tabs: BoardTab[]): BoardTab[] {
     }),
   }));
 }
+
+/**
+ * id → title map of every item across all tabs (Feature 12 — used to skip
+ * `syncLinkTitles` on saves that touch no titles).
+ */
+export function itemTitlesById(tabs: BoardTab[]): Map<string, string> {
+  const titleById = new Map<string, string>();
+  for (const tab of tabs) {
+    for (const item of tab.items || []) titleById.set(item.id, item.title);
+  }
+  return titleById;
+}
+
+/**
+ * Whether two board states have identical item titles. When true, the
+ * link-token title sync (and the equivalent rich-text pass) is a guaranteed
+ * no-op, so callers can skip the whole-board walk.
+ */
+export function sameItemTitles(a: BoardTab[], b: BoardTab[]): boolean {
+  const titlesA = itemTitlesById(a);
+  const titlesB = itemTitlesById(b);
+  if (titlesA.size !== titlesB.size) return false;
+  for (const [id, title] of titlesA) {
+    if (titlesB.get(id) !== title) return false;
+  }
+  return true;
+}
