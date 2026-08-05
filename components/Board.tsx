@@ -82,6 +82,10 @@ const ALIGN_ACTIONS: { mode: AlignMode; label: string; title: string; icon: Reac
 const COALESCE_MS = 1000;
 const HISTORY_PERSIST_DEBOUNCE_MS = 500;
 
+// Firefox reserves Ctrl+D for "bookmark this page" and ignores preventDefault,
+// so the duplicate shortcut falls back to Ctrl+Alt+D there (Feature 04).
+const IS_FIREFOX = typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent);
+
 function getBoxIntersection(cx: number, cy: number, hw: number, hh: number, targetCx: number, targetCy: number) {
   const dx = targetCx - cx;
   const dy = targetCy - cy;
@@ -1738,6 +1742,23 @@ export default function Board({ boardId }: { boardId: string }) {
     setItemContextMenu({ x: e.clientX, y: e.clientY, itemIds: target });
   }, [selectedItemIds]);
 
+  // Feature 04 — right-click anywhere on the canvas. Resolves the card from
+  // the event target (closest [data-item-root]) so the menu works no matter
+  // which inner layer actually received the click; right-clicking empty canvas
+  // closes any open menu and lets the native browser menu show.
+  const handleBoardContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const cardEl = (e.target as HTMLElement).closest('[data-item-root]');
+    if (cardEl) {
+      const id = cardEl.getAttribute('data-item-id');
+      if (id) {
+        e.preventDefault();
+        handleItemContextMenu(e, id);
+      }
+      return;
+    }
+    setItemContextMenu(null);
+  }, [handleItemContextMenu]);
+
   const handleContextMenuDelete = useCallback(() => {
     const ids = itemContextMenu?.itemIds ?? [];
     if (ids.length <= 1) {
@@ -1821,12 +1842,15 @@ export default function Board({ boardId }: { boardId: string }) {
       if (e.key === 'Enter' && activeEl && (activeEl.tagName === 'BUTTON' || activeEl.tagName === 'A')) return;
       if (showMembersModal || showUserSettingsModal || showBoardSettingsModal) return;
 
-      // Feature 04 — duplicate the selection (Ctrl/⌘+D). Runs before the
-      // modifier guard, like Ctrl+K/Ctrl+Z. preventDefault always: the browser
-      // maps Ctrl+D to "bookmark this page". Form fields already returned
+      // Feature 04 — duplicate the selection. Ctrl/⌘+D is the primary binding;
+      // preventDefault stops Chrome/Edge/Safari's bookmark shortcut. Firefox
+      // ignores preventDefault for Ctrl+D, so there the plain combo is left to
+      // the browser and Ctrl/⌘+Alt+D duplicates instead. Runs before the
+      // modifier guard, like Ctrl+K/Ctrl+Z. Form fields already returned
       // above, so Tiptap/inputs keep their own shortcuts.
       const isDuplicate =
-        (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd';
+        ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd' && !IS_FIREFOX) ||
+        ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd');
       if (isDuplicate) {
         e.preventDefault();
         if (editableSelectedItems.length > 0) {
@@ -2134,6 +2158,7 @@ export default function Board({ boardId }: { boardId: string }) {
             }
           }}
           onDrop={handleCanvasDrop}
+          onContextMenu={handleBoardContextMenu}
         >
           {/* Canvas drag-and-drop overlay */}
           {isCanvasDragging && (
@@ -2648,7 +2673,6 @@ export default function Board({ boardId }: { boardId: string }) {
                         tagDefs={tagDefs}
                         activeTagFilter={tagFilter}
                         dimmed={isFilteredOut}
-                        onContextMenu={handleItemContextMenu}
                       />
                     );
                   })}

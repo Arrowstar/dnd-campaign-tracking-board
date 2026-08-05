@@ -365,8 +365,6 @@ interface BoardItemProps {
    *  resize, controls, image drop) regardless of `user`. Clicking still opens
    *  the focus drawer and cross-link navigation still works. */
   readOnly?: boolean;
-  /** Feature 04 — right-click on the card (screen-space context menu). */
-  onContextMenu?: (e: React.MouseEvent, id: string) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -855,7 +853,6 @@ export default memo(function BoardItem({
   activeTagFilter = [],
   dimmed,
   readOnly = false,
-  onContextMenu,
 }: BoardItemProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef(onReportDimensions);
@@ -1217,8 +1214,8 @@ export default memo(function BoardItem({
       }}
       className={`${renderPinCard ? '' : 'flex flex-col'} nodrag transition-shadow duration-200`}
       data-item-root
+      data-item-id={item.id}
       onClick={(e) => onClick(item.id, e)}
-      onContextMenu={onContextMenu ? (e) => onContextMenu(e, item.id) : undefined}
       onDragOver={(e) => {
         if (!canAcceptImageDrop) return;
         e.preventDefault();
