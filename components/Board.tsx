@@ -14,8 +14,11 @@ import { getResolvedControlPoints } from '@/lib/annotationUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { getDefaultNpcFields } from './NpcBoardItemFields';
-import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Tag as TagIcon, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, X, Sliders, Palette, Check, Trash2, Upload, Copy, Move, Tag as TagIcon, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react';
 import { alignItemPositions, AlignMode } from '@/lib/alignment';
+import { duplicateItems } from '@/lib/duplicate';
+import { moveItemsToTab, countConnectionsToDrop } from '@/lib/tabMove';
+import ItemContextMenu from './ItemContextMenu';
 import { uploadFileToBlob } from '@/lib/utils';
 import { syncLinkTitles, sameItemTitles } from '@/lib/crossref';
 import { syncRichTextCardLinks } from '@/lib/cardLinks';
@@ -340,7 +343,14 @@ export default function Board({ boardId }: { boardId: string }) {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkAlignOpen, setBulkAlignOpen] = useState(false);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  /** Feature 04 — right-click context menu: screen-space position + target ids. */
+  const [itemContextMenu, setItemContextMenu] = useState<{
+    x: number;
+    y: number;
+    itemIds: string[];
+  } | null>(null);
 
   // Feature 02 — tags: definitions, autocomplete vocabulary, and filter math.
   const tagDefs = boardSettings.tagDefs;
@@ -364,12 +374,20 @@ export default function Board({ boardId }: { boardId: string }) {
     return [...union];
   })();
 
+  // Feature 04 — connections a bulk move to another tab would delete (moves
+  // are per-tab; cross-tab edges dangle). Shown in the Move popover footer.
+  const bulkMoveDropCount = useMemo(
+    () => countConnectionsToDrop(tabs, new Set(editableSelectedItems.map(i => i.id))),
+    [tabs, editableSelectedItems]
+  );
+
   /** Clears item selection (single + multi) and bulk-bar transient state. */
   const clearItemSelection = useCallback(() => {
     setSelectedItemId(null);
     setSelectedItemIds(new Set());
     setBulkTagOpen(false);
     setBulkAlignOpen(false);
+    setBulkMoveOpen(false);
     setConfirmBulkDelete(false);
   }, []);
   
@@ -1663,6 +1681,88 @@ export default function Board({ boardId }: { boardId: string }) {
     setFocusInitialTab(null);
   }, []);
 
+  // Feature 04 — duplicate items (single or bulk). Ownership mirrors the
+  // server merge: the caller's ids are filtered to items the user may edit
+  // (DM edits all, others only their own) as a client-side backstop. One
+  // saveState call → one undo step. The copies become the new selection; a
+  // single copy also opens the focus drawer (matches the add-item affordance).
+  const handleDuplicateItems = useCallback((ids: string[]) => {
+    if (ids.length === 0 || !user) return;
+    const editableIds = new Set(
+      items.filter(i => user.role === 'dm' || i.ownerId === user.id).map(i => i.id)
+    );
+    const srcs = items.filter(i => ids.includes(i.id) && editableIds.has(i.id));
+    if (srcs.length === 0) return;
+    const copies = duplicateItems(srcs, { id: user.id, name: user.name });
+    const copyIds = copies.map(c => c.id);
+    saveState([...items, ...copies], connections, undefined, 'duplicate');
+    setSelectedItemIds(new Set(copyIds));
+    setSelectedItemId(copyIds.length === 1 ? copyIds[0] : null);
+    if (copies.length === 1) handleOpenFocus(copyIds[0]);
+    setConfirmBulkDelete(false);
+  }, [items, connections, user, saveState, handleOpenFocus]);
+
+  // Feature 04 — move items to another tab (single or bulk). Uses the
+  // full-tabs funnel (saveFullTabsState) because tab membership changes, not
+  // just content of the active tab. One undo step reverts membership AND the
+  // dropped connections (lib/undoHistory records item moves explicitly).
+  const handleMoveToTab = useCallback((ids: string[], targetTabId: string) => {
+    if (ids.length === 0 || !user) return;
+    const editableIds = new Set(
+      items.filter(i => user.role === 'dm' || i.ownerId === user.id).map(i => i.id)
+    );
+    const toMove = ids.filter(id => editableIds.has(id));
+    if (toMove.length === 0) return;
+    const { tabs: updatedTabs } = moveItemsToTab(tabs, new Set(toMove), targetTabId);
+    if (updatedTabs === tabs) return; // target tab missing → no-op
+    saveFullTabsState(updatedTabs, 'move-to-tab');
+    clearItemSelection();
+    // The focused item may now live on another tab — close the drawer rather
+    // than let FocusDrawer render with a null (or wrong-tab) item.
+    setFocusedItemId(prev => (prev && toMove.includes(prev) ? null : prev));
+  }, [tabs, items, user, saveFullTabsState, clearItemSelection]);
+
+  // Feature 04 — right-click on a card. Already-selected cards keep the whole
+  // multi-selection as the menu target; an unselected card is re-selected
+  // first (its single id becomes the target). Screen-space position so the
+  // canvas transform never displaces the menu.
+  const handleItemContextMenu = useCallback((e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    const target = selectedItemIds.has(id)
+      ? [...selectedItemIds]
+      : [id];
+    if (!selectedItemIds.has(id)) {
+      setSelectedItemIds(new Set([id]));
+      setSelectedItemId(id);
+    }
+    setItemContextMenu({ x: e.clientX, y: e.clientY, itemIds: target });
+  }, [selectedItemIds]);
+
+  const handleContextMenuDelete = useCallback(() => {
+    const ids = itemContextMenu?.itemIds ?? [];
+    if (ids.length <= 1) {
+      const id = ids[0];
+      if (!id) return;
+      // Mirror the Delete-key path: close the drawer when the deleted item is
+      // the one open in it, then clear the selection.
+      if (focusedItemId === id) setFocusedItemId(null);
+      handleDeleteItem(id);
+      clearItemSelection();
+    } else {
+      // Multi-delete keeps the bulk bar's two-click confirm (the menu closes;
+      // the bulk bar shows "Delete N?" in red for the second click).
+      handleBulkDelete();
+    }
+    setItemContextMenu(null);
+  }, [itemContextMenu, focusedItemId, handleDeleteItem, handleBulkDelete, clearItemSelection]);
+
+  const handleContextMenuTag = useCallback(() => {
+    // The selection already matches the menu target — reuse the bulk Tag
+    // popover (single item renders "Tag 1 selected card").
+    setBulkTagOpen(true);
+    setItemContextMenu(null);
+  }, []);
+
   // Selecting an annotation deselects any selected board item (and vice versa),
   // so keyboard shortcuts always act on the most recently selected object.
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -1721,6 +1821,20 @@ export default function Board({ boardId }: { boardId: string }) {
       if (e.key === 'Enter' && activeEl && (activeEl.tagName === 'BUTTON' || activeEl.tagName === 'A')) return;
       if (showMembersModal || showUserSettingsModal || showBoardSettingsModal) return;
 
+      // Feature 04 — duplicate the selection (Ctrl/⌘+D). Runs before the
+      // modifier guard, like Ctrl+K/Ctrl+Z. preventDefault always: the browser
+      // maps Ctrl+D to "bookmark this page". Form fields already returned
+      // above, so Tiptap/inputs keep their own shortcuts.
+      const isDuplicate =
+        (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd';
+      if (isDuplicate) {
+        e.preventDefault();
+        if (editableSelectedItems.length > 0) {
+          handleDuplicateItems(editableSelectedItems.map(i => i.id));
+        }
+        return;
+      }
+
       // Align multi-selected items (Ctrl/⌘ + Shift + Alt + letter). Requires the
       // full three-modifier combo so it never collides with the no-modifier
       // switch below or browser/editor shortcuts.
@@ -1762,6 +1876,12 @@ export default function Board({ boardId }: { boardId: string }) {
           }
           break;
         case 'Escape':
+          // A right-click menu owns Escape while open — closing it must not
+          // also drop the selection it was opened from.
+          if (itemContextMenu) {
+            setItemContextMenu(null);
+            break;
+          }
           setSelectedAnnId(null);
           clearItemSelection();
           setIsAddingConnection(false);
@@ -1971,7 +2091,9 @@ export default function Board({ boardId }: { boardId: string }) {
           setSelectedItemIds(new Set());
           setBulkTagOpen(false);
           setBulkAlignOpen(false);
+          setBulkMoveOpen(false);
           setConfirmBulkDelete(false);
+          setItemContextMenu(null);
           setActiveTabId(tabId);
           // Apply the tab's stored view — its precomputed fit on first view,
           // its last view/zoom/pan on revisits. Never recomputes a fit here.
@@ -2526,6 +2648,7 @@ export default function Board({ boardId }: { boardId: string }) {
                         tagDefs={tagDefs}
                         activeTagFilter={tagFilter}
                         dimmed={isFilteredOut}
+                        onContextMenu={handleItemContextMenu}
                       />
                     );
                   })}
@@ -2649,6 +2772,28 @@ export default function Board({ boardId }: { boardId: string }) {
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleDuplicateItems(editableSelectedItems.map(i => i.id))}
+                  disabled={editableSelectedItems.length === 0}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold text-[#E0D8D0] hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+                  title="Duplicate all selected (editable) cards"
+                >
+                  <Copy size={12} className="text-[#B58D3D]" />
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkMoveOpen(v => !v)}
+                  disabled={editableSelectedItems.length === 0}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
+                    bulkMoveOpen ? 'bg-[#B58D3D] text-[#1C1814]' : 'text-[#E0D8D0] hover:bg-white/10'
+                  }`}
+                  title="Move all selected (editable) cards to another tab"
+                >
+                  <Move size={12} className={bulkMoveOpen ? '' : 'text-[#B58D3D]'} />
+                  Move…
+                </button>
+                <button
+                  type="button"
                   onClick={handleBulkDelete}
                   disabled={editableSelectedItems.length === 0}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
@@ -2717,6 +2862,41 @@ export default function Board({ boardId }: { boardId: string }) {
                   </p>
                 </div>
               )}
+
+              {/* Bulk Move popover — destination tabs (color dot + name). x/y is
+                  shared world space, so positions survive the move; only the
+                  connections touching the moved cards are dropped. */}
+              {bulkMoveOpen && (
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 bg-[#2C2824]/98 backdrop-blur-sm border border-[#B58D3D] rounded-xl p-3 shadow-2xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#8C7B6E] mb-1.5">
+                    Move {editableSelectedItems.length} selected card{editableSelectedItems.length === 1 ? '' : 's'} to…
+                  </div>
+                  <div className="flex flex-col gap-0.5 max-h-64 overflow-y-auto">
+                    {tabs.filter(t => t.id !== activeTabId).map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => handleMoveToTab(editableSelectedItems.map(i => i.id), tab.id)}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-[#E0D8D0] hover:bg-[#B58D3D] hover:text-[#1C1814] transition-colors cursor-pointer"
+                        title={`Move to ${tab.name}`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: tab.color || '#3B82F6' }} />
+                        <span className="font-semibold truncate">{tab.name}</span>
+                      </button>
+                    ))}
+                    {tabs.length <= 1 && (
+                      <div className="text-[10px] text-[#8C7B6E] px-2 py-1.5">
+                        No other tabs yet — add one with the + in the tab bar.
+                      </div>
+                    )}
+                  </div>
+                  {bulkMoveDropCount > 0 && (
+                    <p className="text-[10px] text-[#8C7B6E] mt-2">
+                      {bulkMoveDropCount} connection{bulkMoveDropCount === 1 ? '' : 's'} will be removed.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>{/* end canvas drag-drop wrapper */}
@@ -2746,9 +2926,43 @@ export default function Board({ boardId }: { boardId: string }) {
               tagDefs={tagDefs}
               allTagNames={allTagsInUse}
               onUpdateSettings={handleUpdateSettings}
+              onDuplicate={(id) => handleDuplicateItems([id])}
+              onMoveToTab={(id, tabId) => handleMoveToTab([id], tabId)}
+              tabs={tabs}
+              activeTabId={activeTabId}
             />
           );
         })()}
+
+        {/* Feature 04 — right-click context menu (fixed at cursor, above the canvas) */}
+        {itemContextMenu && user && (
+          <ItemContextMenu
+            x={itemContextMenu.x}
+            y={itemContextMenu.y}
+            count={itemContextMenu.itemIds.length}
+            canEdit={itemContextMenu.itemIds.every(
+              id => user.role === 'dm' || items.find(i => i.id === id)?.ownerId === user.id
+            )}
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onClose={() => setItemContextMenu(null)}
+            onOpen={() => {
+              const first = itemContextMenu.itemIds[0];
+              if (first) handleOpenFocus(first);
+              setItemContextMenu(null);
+            }}
+            onDuplicate={() => {
+              handleDuplicateItems(itemContextMenu.itemIds);
+              setItemContextMenu(null);
+            }}
+            onMoveToTab={(tabId) => {
+              handleMoveToTab(itemContextMenu.itemIds, tabId);
+              setItemContextMenu(null);
+            }}
+            onTag={handleContextMenuTag}
+            onDelete={handleContextMenuDelete}
+          />
+        )}
 
         {/* ── Account Settings & Member Management Modals ── */}
         {user && (

@@ -101,6 +101,9 @@ export function buildSaveOps(patch: HistoryPatch): ItemSaveOp[] | null {
     return null;
   }
   if (!isEqual(patch.tabOrder.before, patch.tabOrder.after)) return null;
+  // Feature 04 — tab moves change membership, not item content: the ops path
+  // has no expression for them, and an empty ops array would otherwise be sent.
+  if (patch.moves.length > 0) return null;
 
   const { before, after } = patch.items;
   for (const id of Object.keys(after)) {

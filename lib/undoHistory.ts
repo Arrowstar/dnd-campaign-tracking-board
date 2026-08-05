@@ -5,8 +5,8 @@
  * full-board snapshot history:
  *
  *  - `computeDiff` records ONLY what changed (per item / connection /
- *    annotation / tab), so an undo step is a handful of ids instead of a whole
- *    board copy.
+ *    annotation / tab / item-move), so an undo step is a handful of ids
+ *    instead of a whole board copy.
  *  - `applyPatch` reconciles the patch ON TOP of the current state: ids the
  *    local user didn't mutate are never touched, ids that have since changed
  *    remotely are skipped (never clobbered), and deleted-then-recreated ids
@@ -34,6 +34,18 @@ export type DeltaEntry<T extends { id: string }> = {
   after: Record<string, T>;
 };
 
+/**
+ * An item whose TAB MEMBERSHIP changed without its content changing (Feature 04
+ * move-to-tab). `computeDiff` can't express this through the content deltas —
+ * the item value is identical in both tabs — so moves are recorded explicitly
+ * so one undo step can revert them.
+ */
+export type ItemMove = {
+  id: string;
+  fromTabId: string;
+  toTabId: string;
+};
+
 export type HistoryPatch = {
   items: DeltaEntry<BoardItem>;
   connections: DeltaEntry<Connection>;
@@ -47,6 +59,8 @@ export type HistoryPatch = {
     connections: Record<string, string>;
     annotations: Record<string, string>;
   };
+  /** Items moved between tabs with unchanged content (may be empty). */
+  moves: ItemMove[];
 };
 
 /** One undo step. The in-memory stack also keeps before/after tab REFERENCES for the coalescing guard (Board.tsx); only this shape is serialized. */
@@ -145,7 +159,9 @@ function computeTabDelta(
 /**
  * Diff two board states into a HistoryPatch. Items/connections/annotations are
  * flattened across all tabs (ids are globally unique uuids); tabs are diffed
- * shallowly (name/color) with their order captured in `tabOrder`.
+ * shallowly (name/color) with their order captured in `tabOrder`. Items whose
+ * content is identical but whose owning tab changed are captured in `moves`
+ * (Feature 04 move-to-tab) — the content deltas cannot express a tab change.
  */
 export function computeDiff(beforeTabs: BoardTab[], afterTabs: BoardTab[]): HistoryPatch {
   const beforeItems = indexCollection(beforeTabs, (t) => t.items);
@@ -161,6 +177,17 @@ export function computeDiff(beforeTabs: BoardTab[], afterTabs: BoardTab[]): Hist
   const connections = computeDelta(beforeConns, afterConns);
   const annotations = computeDelta(beforeAnns, afterAnns);
 
+  // Items present in both states with identical content but a different owning
+  // tab are invisible to computeDelta — record them as moves. Ids already in
+  // the content delta (changed value AND tab) stay in the delta only.
+  const moves: ItemMove[] = [];
+  for (const [id, entry] of beforeItems) {
+    const next = afterItems.get(id);
+    if (next && next.tabId !== entry.tabId && isEqual(entry.value, next.value)) {
+      moves.push({ id, fromTabId: entry.tabId, toTabId: next.tabId });
+    }
+  }
+
   return {
     items: items.delta,
     connections: connections.delta,
@@ -175,6 +202,7 @@ export function computeDiff(beforeTabs: BoardTab[], afterTabs: BoardTab[]): Hist
       connections: connections.tabOf,
       annotations: annotations.tabOf,
     },
+    moves,
   };
 }
 
@@ -368,6 +396,53 @@ function applyTabDelta(currentTabs: BoardTab[], patch: HistoryPatch, dir: 'undo'
 }
 
 /**
+ * Reconcile item tab moves against the current state. Undo moves the item back
+ * to `fromTabId`; redo moves it to `toTabId`. Rules:
+ *  - item still in the expected tab → moved to the destination tab (appended).
+ *  - item already elsewhere (someone else moved it) → silent no-op, never
+ *    clobber another client's move.
+ *  - item gone (deleted remotely) → silent no-op, never resurrect.
+ *  - expected or destination tab gone remotely → skipped (with notice) — the
+ *    tab delta restores tabs deleted by this very entry.
+ * Content is never touched — only membership.
+ */
+function applyItemMoves(
+  currentTabs: BoardTab[],
+  patch: HistoryPatch,
+  dir: 'undo' | 'redo',
+  skipped: string[]
+): BoardTab[] {
+  const moves = patch.moves ?? [];
+  if (moves.length === 0) return currentTabs;
+
+  const currentById = new Map(currentTabs.map((t) => [t.id, t]));
+  let work: BoardTab[] | null = null;
+
+  for (const move of moves) {
+    const expectedTabId = dir === 'undo' ? move.toTabId : move.fromTabId;
+    const destTabId = dir === 'undo' ? move.fromTabId : move.toTabId;
+    if (!currentById.has(expectedTabId) || !currentById.has(destTabId)) {
+      skipped.push(move.id);
+      continue;
+    }
+    const srcItems = work
+      ? work.find((t) => t.id === expectedTabId)!.items
+      : currentById.get(expectedTabId)!.items || [];
+    const index = srcItems.findIndex((i) => i.id === move.id);
+    if (index === -1) continue;
+    if (!work) {
+      work = currentTabs.map((t) => ({ ...t, items: [...(t.items || [])] }));
+    }
+    const src = work.find((t) => t.id === expectedTabId)!;
+    const dst = work.find((t) => t.id === destTabId)!;
+    const [item] = src.items.splice(index, 1);
+    dst.items.push(item);
+  }
+
+  return work ?? currentTabs;
+}
+
+/**
  * Apply a patch on top of the current state. Returns the reconciled tabs (the
  * SAME reference when nothing changed) plus the ids that were skipped because
  * the board moved on (for the "N step skipped" notice).
@@ -382,6 +457,7 @@ export function applyPatch(
   tabs = applyCollectionDelta(tabs, patch.items, patch.tabOf.items, dir, 'items', skipped);
   tabs = applyCollectionDelta(tabs, patch.connections, patch.tabOf.connections, dir, 'connections', skipped);
   tabs = applyCollectionDelta(tabs, patch.annotations, patch.tabOf.annotations, dir, 'annotations', skipped);
+  tabs = applyItemMoves(tabs, patch, dir, skipped);
   tabs = applyTabDelta(tabs, patch, dir, skipped);
   return { tabs, skipped };
 }
@@ -438,6 +514,16 @@ function isDeltaEntry(value: unknown): value is DeltaEntry<{ id: string }> {
   return isIdRecord(v.before) && isIdRecord(v.after);
 }
 
+function isItemMove(value: unknown): value is ItemMove {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === 'string' &&
+    typeof v.fromTabId === 'string' &&
+    typeof v.toTabId === 'string'
+  );
+}
+
 function isHistoryPatch(value: unknown): value is HistoryPatch {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
@@ -454,7 +540,10 @@ function isHistoryPatch(value: unknown): value is HistoryPatch {
     !!tabOf &&
     isStringRecord(tabOf.items) &&
     isStringRecord(tabOf.connections) &&
-    isStringRecord(tabOf.annotations)
+    isStringRecord(tabOf.annotations) &&
+    // `moves` is optional for backward compatibility with entries persisted
+    // before Feature 04 (a missing field validates as an empty list).
+    (v.moves === undefined || (Array.isArray(v.moves) && v.moves.every(isItemMove)))
   );
 }
 
@@ -470,14 +559,26 @@ function isUndoEntry(value: unknown): value is UndoEntry {
   );
 }
 
-/** Parse a persisted payload; discards anything not matching the current version/shape. */
+/**
+ * Parse a persisted payload; discards anything not matching the current
+ * version/shape. Entries persisted before Feature 04 (no `moves` field) are
+ * normalized to `moves: []` so consumers can rely on the field.
+ */
 export function deserializeHistory(raw: string): UndoEntry[] {
   try {
     const parsed = JSON.parse(raw) as { v?: unknown; entries?: unknown };
     if (!parsed || typeof parsed !== 'object' || parsed.v !== STORAGE_VERSION || !Array.isArray(parsed.entries)) {
       return [];
     }
-    return parsed.entries.filter(isUndoEntry);
+    return parsed.entries
+      .filter(isUndoEntry)
+      .map(entry => ({
+        ...entry,
+        patch: {
+          ...entry.patch,
+          moves: entry.patch.moves ?? [],
+        },
+      }));
   } catch {
     return [];
   }

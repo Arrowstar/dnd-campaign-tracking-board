@@ -59,6 +59,7 @@ function makePatch(overrides: Partial<HistoryPatch> = {}): HistoryPatch {
     tabs: emptyDelta(),
     tabOrder: { before: ['tab-1'], after: ['tab-1'] },
     tabOf: { items: {}, connections: {}, annotations: {} },
+    moves: [],
     ...overrides,
   };
 }

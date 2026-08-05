@@ -7,8 +7,9 @@ import {
   User as UserIcon, Send, Edit3, Check, GripVertical, Equal,
   Upload, Link as LinkIcon, Image as ImageIcon,
   ChevronUp, ChevronDown, SlidersHorizontal, Crop as CropIcon,
+  Copy, FolderInput,
 } from 'lucide-react';
-import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout, TagDef, BoardSettings } from '@/lib/types';
+import { BoardItem as BoardItemType, User, ItemField, PreviewFieldSlot, PreviewFieldMode, PreviewLayout, TagDef, BoardSettings, BoardTab } from '@/lib/types';
 import { RichTextEditor, RichTextDisplay } from './RichTextEditor';
 import { highlightMentions } from '@/lib/mentions';
 import TagEditor from './TagEditor';
@@ -71,6 +72,14 @@ interface FocusDrawerProps {
    *  fields, tags, delete, visibility/owner menus, Board Card tab, comment
    *  input, width resize). Content + read-only Comments remain. */
   readOnly?: boolean;
+  /** Feature 04 — duplicate this card (fresh uuid, owner = duplicator). */
+  onDuplicate?: (id: string) => void;
+  /** Feature 04 — move this card to another tab (x/y preserved). */
+  onMoveToTab?: (id: string, targetTabId: string) => void;
+  /** Feature 04 — tab list for the "Move to tab" menu (active tab excluded). */
+  tabs?: BoardTab[];
+  /** Feature 04 — the tab this drawer's board is showing. */
+  activeTabId?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,6 +127,10 @@ export default function FocusDrawer({
   allTagNames,
   onUpdateSettings,
   readOnly = false,
+  onDuplicate,
+  onMoveToTab,
+  tabs,
+  activeTabId,
 }: FocusDrawerProps) {
   const [activeTab, setActiveTab] = useState<'content' | 'comments' | 'preview'>('content');
   const [commentText, setCommentText] = useState('');
@@ -125,6 +138,7 @@ export default function FocusDrawer({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
   const [showOwnerMenu, setShowOwnerMenu] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
 
   const canEdit = !readOnly && (!item || item.ownerId === user.id || user.role === 'dm');
   const itemColor = item?.color || '#423D38';
@@ -148,6 +162,7 @@ export default function FocusDrawer({
     setCommentText('');
     setShowVisibilityMenu(false);
     setShowOwnerMenu(false);
+    setShowMoveMenu(false);
   }
   }
 
@@ -501,6 +516,53 @@ export default function FocusDrawer({
                     <p className="text-[10px] text-[#8C7B6E]">New tags get the default gray color (the DM can color them).</p>
                   ) : (
                     <p className="text-[10px] text-[#8C7B6E]">Tags without a color default to gray. Click a swatch to define a color for the board.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Duplicate + Move to tab (Feature 04) */}
+              {canEdit && (onDuplicate || onMoveToTab) && (
+                <div className="mt-4 pt-4 border-t border-[#D9D0C1] flex flex-col gap-1">
+                  {onDuplicate && (
+                    <button
+                      type="button"
+                      onClick={() => onDuplicate(item.id)}
+                      className="flex items-center gap-1.5 text-[#423D38] hover:text-[#B58D3D] text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      <Copy size={13} /> Duplicate this card
+                    </button>
+                  )}
+                  {onMoveToTab && tabs && tabs.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowMoveMenu(v => !v)}
+                        className="flex items-center gap-1.5 text-[#423D38] hover:text-[#B58D3D] text-xs font-semibold cursor-pointer transition-colors"
+                      >
+                        <FolderInput size={13} /> Move to tab{' '}
+                        <span className={`ml-auto text-[10px] transition-transform ${showMoveMenu ? 'rotate-90' : ''}`}>▸</span>
+                      </button>
+                      {showMoveMenu && (
+                        <div className="flex flex-col gap-0.5 mt-1 rounded-lg border border-[#D9D0C1] bg-white/60 p-1">
+                          {tabs.filter(t => t.id !== activeTabId).map(tab => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => { onMoveToTab(item.id, tab.id); setShowMoveMenu(false); }}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-semibold text-[#423D38] hover:bg-[#B58D3D] hover:text-[#1C1814] transition-colors cursor-pointer"
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: tab.color || '#3B82F6' }} />
+                              <span className="truncate">{tab.name}</span>
+                            </button>
+                          ))}
+                          {tabs.filter(t => t.id !== activeTabId).length === 0 && (
+                            <div className="px-2 py-1.5 text-[10px] text-[#8C7B6E] italic">
+                              No other tabs yet.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

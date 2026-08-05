@@ -76,6 +76,7 @@ const EMPTY_PATCH = (): HistoryPatch => ({
   tabs: { before: {}, after: {} },
   tabOrder: { before: ['t1'], after: ['t1'] },
   tabOf: { items: {}, connections: {}, annotations: {} },
+  moves: [],
 });
 
 const makeEntry = (id: string, patch: HistoryPatch): UndoEntry => ({
@@ -168,6 +169,24 @@ describe('computeDiff', () => {
     expect(patch.tabOrder.before).toEqual(['t1', 't2', 't3']);
     expect(patch.tabOrder.after).toEqual(['t3', 't1', 't2']);
   });
+
+  it('captures tab membership changes as moves when content is unchanged', () => {
+    const a = makeItem('a');
+    const before = [makeTab('t1', 'One', [a, makeItem('b')]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', [makeItem('b')]), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    expect(patch.moves).toEqual([{ id: 'a', fromTabId: 't1', toTabId: 't2' }]);
+    expect(patch.items).toEqual({ before: {}, after: {} }); // no content delta
+  });
+
+  it('does not double-record moves whose content also changed (stays in the delta)', () => {
+    const before = [makeTab('t1', 'One', [makeItem('a', 'Old')]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [makeItem('a', 'New')])];
+    const patch = computeDiff(before, after);
+    expect(patch.moves).toEqual([]);
+    expect(Object.keys(patch.items.before)).toEqual(['a']);
+    expect(patch.tabOf.items.a).toBe('t2'); // owning tab as of the after state
+  });
 });
 
 // ─── applyPatch ───────────────────────────────────────────────────────────────
@@ -247,6 +266,84 @@ describe('applyPatch undo', () => {
     const patch = computeDiff(before, after);
     const result = applyPatch(after, patch, 'undo');
     expect(result.tabs[0].annotations?.[0].x).toBe(1);
+  });
+});
+
+describe('applyPatch moves', () => {
+  const a = makeItem('a', 'Item a');
+
+  it('undoes a move back to the source tab without touching content', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    expect(patch.moves).toHaveLength(1);
+    const result = applyPatch(after, patch, 'undo');
+    expect(result.skipped).toEqual([]);
+    expect(result.tabs[0].items.map((i) => i.id)).toEqual(['a']);
+    expect(result.tabs[1].items).toEqual([]);
+    expect(result.tabs[0].items[0]).toEqual(a);
+  });
+
+  it('redo re-applies the move to the target tab', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    const undone = applyPatch(after, patch, 'undo');
+    const redone = applyPatch(undone.tabs, patch, 'redo');
+    expect(redone.tabs[0].items).toEqual([]);
+    expect(redone.tabs[1].items.map((i) => i.id)).toEqual(['a']);
+  });
+
+  it('moves multiple items, preserving order by append', () => {
+    const b = makeItem('b', 'Item b');
+    const before = [makeTab('t1', 'One', [a, b]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a, b])];
+    const patch = computeDiff(before, after);
+    const undone = applyPatch(after, patch, 'undo');
+    expect(undone.tabs[0].items.map((i) => i.id)).toEqual(['a', 'b']);
+  });
+
+  it('silently no-ops when the item was deleted remotely', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    const remoteDeleted = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [])];
+    const result = applyPatch(remoteDeleted, patch, 'undo');
+    expect(result.skipped).toEqual([]);
+    expect(result.tabs).toBe(remoteDeleted);
+  });
+
+  it('silently no-ops when the item was moved again by another client', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    const remoteMoved = [makeTab('t1', 'One', []), makeTab('t2', 'Two', []), makeTab('t3', 'Three', [a])];
+    const result = applyPatch(remoteMoved, patch, 'undo');
+    expect(result.skipped).toEqual([]);
+    expect(result.tabs).toBe(remoteMoved);
+  });
+
+  it('skips with a notice when the destination tab was deleted remotely', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    const remote = [makeTab('t1', 'One', [])];
+    const result = applyPatch(remote, patch, 'undo');
+    expect(result.skipped).toEqual(['a']);
+    expect(result.tabs).toBe(remote);
+  });
+
+  it('leaves the item content intact across a move undo after a remote edit', () => {
+    const before = [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])];
+    const after = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])];
+    const patch = computeDiff(before, after);
+    // Remote user edited the item's title while it sat on t2 — the move undo
+    // still reverts membership (content deltas are tracked separately).
+    const remoteEdit = [makeTab('t1', 'One', []), makeTab('t2', 'Two', [{ ...a, title: 'Remote' }])];
+    const result = applyPatch(remoteEdit, patch, 'undo');
+    expect(result.skipped).toEqual([]);
+    expect(result.tabs[0].items.map((i) => i.id)).toEqual(['a']);
+    expect(result.tabs[0].items[0].title).toBe('Remote');
   });
 });
 
@@ -380,6 +477,32 @@ describe('serializeHistory / deserializeHistory', () => {
     const entry = makeEntry('e1', computeDiff(tabs, [makeTab('t1', 'Main', [makeItem('a', 'New')])]));
     const out = deserializeHistory(serializeHistory([entry]));
     expect(out).toEqual([entry]);
+  });
+
+  it('round-trips move entries', () => {
+    const a = makeItem('a');
+    const patch = computeDiff(
+      [makeTab('t1', 'One', [a]), makeTab('t2', 'Two', [])],
+      [makeTab('t1', 'One', []), makeTab('t2', 'Two', [a])]
+    );
+    expect(patch.moves).toHaveLength(1);
+    const out = deserializeHistory(serializeHistory([makeEntry('move', patch)]));
+    expect(out[0].patch.moves).toEqual([{ id: 'a', fromTabId: 't1', toTabId: 't2' }]);
+  });
+
+  it('accepts entries persisted before moves existed (missing moves = empty)', () => {
+    const entry = makeEntry('e1', computeDiff(tabs, tabs));
+    delete (entry.patch as { moves?: unknown }).moves;
+    const raw = JSON.stringify({ v: 1, entries: [entry] });
+    const out = deserializeHistory(raw);
+    expect(out).toHaveLength(1);
+    expect(out[0].patch.moves).toEqual([]);
+  });
+
+  it('rejects malformed move records', () => {
+    const entry = makeEntry('e1', computeDiff(tabs, tabs));
+    entry.patch.moves = [{ id: 'a', fromTabId: 1 as unknown as string, toTabId: 't2' }];
+    expect(deserializeHistory(JSON.stringify({ v: 1, entries: [entry] }))).toEqual([]);
   });
 
   it('returns [] for an empty list', () => {
