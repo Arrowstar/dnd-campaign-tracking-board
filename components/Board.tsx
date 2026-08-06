@@ -2159,6 +2159,18 @@ export default function Board({ boardId }: { boardId: string }) {
           }}
           onDrop={handleCanvasDrop}
           onContextMenu={handleBoardContextMenu}
+          onPointerDownCapture={(e) => {
+            // Feature 04 — Firefox opens its native context menu from the
+            // right-button mousedown default, so canceling the later
+            // `contextmenu` event is too late there (unlike Chrome). Prevent
+            // the pointerdown default for right-button presses on cards —
+            // exactly where our custom menu replaces the native one. Capture
+            // phase so tag chips/comment controls that stopPropagation on
+            // pointerdown can't bypass it.
+            if (e.button === 2 && (e.target as HTMLElement).closest('[data-item-root]')) {
+              e.preventDefault();
+            }
+          }}
         >
           {/* Canvas drag-and-drop overlay */}
           {isCanvasDragging && (

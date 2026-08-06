@@ -91,6 +91,12 @@ export default function ItemContextMenu({
         backdropFilter: 'blur(6px)',
       }}
       onContextMenu={(e) => e.preventDefault()}
+      onMouseDown={(e) => {
+        // Firefox opens its native menu on the right-button mousedown default,
+        // which the contextmenu preventDefault above is too late to stop —
+        // same quirk as the cards themselves.
+        if (e.button === 2) e.preventDefault();
+      }}
     >
       {n === 1 && (
         <button type="button" className={itemClass} onClick={onOpen}>
